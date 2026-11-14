@@ -334,22 +334,53 @@ class Notebook extends ChangeNotifier {
   Future<List<VaultFile>> trashed() async =>
       (await vault.listIn(trashDir))..sort((a, b) => b.mtime.compareTo(a.mtime));
 
-  /// Put a note from the trash back in the folder it was in (renamed when the name is taken there).
-  Future<Note> restore(VaultFile file) async {
-    final text = await vault.read(file);
+  /// Put a note, canvas or base from the trash back in the folder it was in (renamed when the name is taken
+  /// there). Where it went.
+  Future<VaultFile> restore(VaultFile file) async {
     final was = file.path.substring(trashDir.length + 1);
+    final ext = extOf(was);
     final folder = parentOf(was);
-    final base = _noExt(was.split('/').last);
-    var name = base;
-    for (var n = 2; _notes.containsKey(_join(folder, '$name.md')); n++) {
-      name = '$base $n';
+    final base = was.split('/').last;
+    final stem = base.substring(0, base.length - ext.length);
+    bool taken(String p) => _notes.containsKey(p) || others.any((f) => f.path == p);
+    var name = stem;
+    for (var n = 2; taken(_join(folder, '$name$ext')); n++) {
+      name = '$stem $n';
     }
-    final moved = await vault.move(file, _join(folder, '$name.md'));
-    final note = Note(file: moved, text: text);
-    _notes[moved.path] = note;
-    _saveCache();
+    final text = ext == '.md' ? await vault.read(file) : null;
+    final moved = await vault.move(file, _join(folder, '$name$ext'));
+    if (text != null) {
+      _notes[moved.path] = Note(file: moved, text: text);
+      _saveCache();
+    } else {
+      others = [...others, moved];
+    }
     notifyListeners();
-    return note;
+    return moved;
+  }
+
+  /// A file's kind by its name: ".md", ".canvas" or ".base" ('' for anything else).
+  static String extOf(String path) => RegExp(r'\.(md|canvas|base)$').firstMatch(path)?.group(0) ?? '';
+
+  /// Move a canvas or base to the trash.
+  Future<void> trashFile(VaultFile file) async {
+    await vault.move(file, await _freeInTrash(file.path));
+    others = [for (final f in others) if (f.path != file.path) f];
+    notifyListeners();
+  }
+
+  /// Rename a canvas or base where it is ([name]), or move it into [folder].
+  Future<VaultFile> moveFile(VaultFile file, {String? name, String? folder}) async {
+    final ext = extOf(file.path);
+    final last = file.path.split('/').last;
+    final stem = name == null ? last.substring(0, last.length - ext.length) : fileName(name);
+    final path = _join(folder ?? parentOf(file.path), '$stem$ext');
+    if (path == file.path) return file;
+    if (others.any((f) => f.path == path)) throw StateError('"$stem$ext" already exists there');
+    final moved = await vault.move(file, path);
+    others = [for (final f in others) if (f.path != file.path) f, moved];
+    notifyListeners();
+    return moved;
   }
 
   /// Delete a note in the trash for good.
@@ -361,7 +392,7 @@ class Notebook extends ChangeNotifier {
   /// [path] in the trash, or "path 2"... when that is taken: ".trash/Work/Plan.md", ".trash/Work/Plan 2.md".
   Future<String> _freeInTrash(String path) async {
     final taken = {for (final f in await vault.listIn(trashDir)) f.path.toLowerCase()};
-    final dot = path.endsWith('.md') ? path.length - 3 : path.length;
+    final dot = path.length - extOf(path).length;
     final base = path.substring(0, dot), ext = path.substring(dot);
     var candidate = '$trashDir/$path';
     for (var n = 2; taken.contains(candidate.toLowerCase()) || taken.any((t) => t.startsWith('${candidate.toLowerCase()}/')); n++) {

@@ -5,6 +5,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../../app/services.dart';
+import '../../core/notes/notebook.dart';
 import '../../core/notes/vault.dart';
 
 class TrashScreen extends StatefulWidget {
@@ -37,9 +38,10 @@ class _TrashScreenState extends State<TrashScreen> {
       true;
 
   Future<void> _restore(VaultFile file) async {
-    final note = await _book.restore(file);
+    final back = await _book.restore(file);
     _reload();
-    _say('"${note.title}" is back in ${note.folder.isEmpty ? 'the top folder' : note.folder}');
+    final folder = Notebook.parentOf(back.path);
+    _say('"${_name(back)}" is back in ${folder.isEmpty ? 'the top folder' : folder}');
   }
 
   Future<void> _delete(VaultFile file) async {
@@ -54,7 +56,7 @@ class _TrashScreenState extends State<TrashScreen> {
     _reload();
   }
 
-  static String _name(VaultFile f) => f.path.split('/').last.replaceFirst(RegExp(r'\.md$'), '');
+  static String _name(VaultFile f) => f.path.split('/').last.replaceFirst(RegExp(r'\.(md|canvas|base)$'), '');
 
   @override
   Widget build(BuildContext context) {
@@ -80,7 +82,11 @@ class _TrashScreenState extends State<TrashScreen> {
                         final where = f.path.split('/');
                         return Card(
                           child: ListTile(
-                            leading: const Icon(Icons.description_outlined),
+                            leading: Icon(f.path.endsWith('.canvas')
+                                ? Icons.dashboard_customize_outlined
+                                : f.path.endsWith('.base')
+                                    ? Icons.table_chart_outlined
+                                    : Icons.description_outlined),
                             title: Text(_name(f), maxLines: 1, overflow: TextOverflow.ellipsis),
                             subtitle: where.length > 2 ? Text('in ${where.sublist(1, where.length - 1).join('/')}') : null,
                             trailing: PopupMenuButton<String>(

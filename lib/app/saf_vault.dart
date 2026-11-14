@@ -188,7 +188,7 @@ class SafVault implements Vault {
       for (final f in await _util.list(dir)) {
         if (f.isDir) {
           if (depth < 8) await walk(f.uri, '$prefix${f.name}/', depth + 1);
-        } else if (f.name.endsWith('.md')) {
+        } else if (Vault.kept(f.name)) {
           out.add(VaultFile(path: '$prefix${f.name}', uri: f.uri, mtime: f.lastModified, size: f.length));
         }
       }

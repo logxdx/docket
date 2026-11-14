@@ -287,6 +287,45 @@ class _NotesScreenState extends State<NotesScreen> {
     if (mounted) _openFile(file);
   }
 
+  /// Rename, move or trash a canvas or base.
+  Future<void> _manageFile(VaultFile f) async {
+    final name = f.path.split('/').last.replaceFirst(RegExp(r'\.(canvas|base)$'), '');
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(title: Text(name, style: Theme.of(context).textTheme.titleMedium)),
+          ListTile(leading: const Icon(Icons.drive_file_rename_outline_rounded), title: const Text('Rename'),
+              onTap: () => Navigator.pop(context, 'rename')),
+          ListTile(leading: const Icon(Icons.drive_file_move_outlined), title: const Text('Move to folder'),
+              onTap: () => Navigator.pop(context, 'move')),
+          ListTile(leading: const Icon(Icons.delete_outline_rounded), title: const Text('Move to trash'),
+              onTap: () => Navigator.pop(context, 'trash')),
+        ]),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    try {
+      switch (choice) {
+        case 'rename':
+          final to = await _askName('Rename', 'Rename', initial: name);
+          if (to != null && to.trim().isNotEmpty) await _book.moveFile(f, name: to);
+        case 'move':
+          final to = await pickFolder(context, _book, title: 'Move "$name" to');
+          if (to != null) {
+            await _book.moveFile(f, folder: to);
+            _say('Moved to ${to.isEmpty ? 'the top folder' : to}');
+          }
+        case 'trash':
+          await _book.trashFile(f);
+          _say('"$name" moved to the trash');
+      }
+    } on StateError catch (e) {
+      _say(e.message);
+    }
+  }
+
   void _openFile(VaultFile f) => Navigator.push(
         context,
         MaterialPageRoute<void>(builder: (_) => f.path.endsWith('.canvas') ? CanvasScreen(file: f) : BaseScreen(file: f)),
@@ -620,7 +659,11 @@ class _NotesScreenState extends State<NotesScreen> {
                           final other = at - folders.length;
                           if (other >= 0 && other < others.length) {
                             final f = others[other];
-                            return _FileCard(file: f, onTap: _selecting ? null : () => _openFile(f));
+                            return _FileCard(
+                              file: f,
+                              onTap: _selecting ? null : () => _openFile(f),
+                              onLongPress: readOnly || _selecting ? null : () => _manageFile(f),
+                            );
                           }
                           final item = shown[other < 0 ? at : at - others.length];
                           final selected = _selected.contains(item);
@@ -772,10 +815,11 @@ class _FolderCard extends StatelessWidget {
 
 /// A canvas or a base, opened in its own view.
 class _FileCard extends StatelessWidget {
-  const _FileCard({required this.file, required this.onTap});
+  const _FileCard({required this.file, required this.onTap, required this.onLongPress});
 
   final VaultFile file;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -786,6 +830,7 @@ class _FileCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(children: [

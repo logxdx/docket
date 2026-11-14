@@ -37,6 +37,28 @@ void main() {
     expect(CanvasDoc.parse('').nodes, isEmpty);
   });
 
+  test('canvases and bases: made, renamed, moved, trashed and restored as themselves', () async {
+    final dir = Directory.systemTemp.createTempSync('others');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final book = Notebook(LocalVault(dir));
+    await book.refresh();
+    final board = await book.createFile('', 'Board', '.canvas', '{"nodes":[],"edges":[]}');
+    await book.createFile('', 'Board', '.canvas', '{}');
+    expect(book.othersIn('').map((f) => f.path), unorderedEquals(['Board.canvas', 'Board 2.canvas']));
+    final renamed = await book.moveFile(board, name: 'Plan');
+    final moved = await book.moveFile(renamed, folder: 'Work');
+    expect(moved.path, 'Work/Plan.canvas');
+    await book.trashFile(moved);
+    final trashed = await book.trashed();
+    expect(trashed.map((f) => f.path), ['.trash/Work/Plan.canvas']);
+    final back = await book.restore(trashed.single);
+    expect(back.path, 'Work/Plan.canvas');
+    expect(book.othersIn('Work').single.path, 'Work/Plan.canvas');
+    expect(book.notes, isEmpty, reason: 'a canvas is not a note');
+    await book.refresh();
+    expect(book.others.length, 2);
+  });
+
   test('slides: cut at --- outside code', () {
     expect(slidesOf('# One\nA\n---\n# Two\n```\n---\n```\n---\n\n---\nLast'), ['# One\nA', '# Two\n```\n---\n```', 'Last']);
   });

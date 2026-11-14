@@ -66,6 +66,9 @@ abstract class Vault {
   /// The notes in [folder] (a dot-folder such as .trash, which [list] skips), recursively.
   Future<List<VaultFile>> listIn(String folder);
 
+  /// Whether [listIn] lists a file: a note, a canvas or a base.
+  static bool kept(String name) => name.endsWith('.md') || name.endsWith('.canvas') || name.endsWith('.base');
+
   /// The bytes of the file at [path] (an image), or null when it is not there.
   Future<Uint8List?> readBytes(String path);
 
@@ -220,7 +223,7 @@ class LocalVault implements Vault {
     if (!dir.existsSync()) return [];
     return [
       await for (final e in dir.list(recursive: true, followLinks: false))
-        if (e is File && e.path.endsWith('.md')) _entry(e),
+        if (e is File && Vault.kept(e.path)) _entry(e),
     ];
   }
 }
