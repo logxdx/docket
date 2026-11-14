@@ -12,27 +12,37 @@ import '../../core/notes/properties.dart';
 import '../../core/notes/recovery.dart';
 
 /// The note's properties, each with its kind's control: text, a list (comma separated here), a number, a
-/// checkbox, a date. Returns the note's new text, or null when nothing changed.
-Future<String?> editProperties(BuildContext context, String text) {
-  return showModalBottomSheet<String>(
+/// checkbox, a date. Every change goes to [onChanged] at once, as in Obsidian: closing the sheet any way keeps it.
+Future<void> editProperties(BuildContext context, String text, ValueChanged<String> onChanged) {
+  return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (context) => _PropertiesSheet(text: text),
+    builder: (context) => _PropertiesSheet(text: text, onChanged: onChanged),
   );
 }
 
 class _PropertiesSheet extends StatefulWidget {
-  const _PropertiesSheet({required this.text});
+  const _PropertiesSheet({required this.text, required this.onChanged});
 
   final String text;
+  final ValueChanged<String> onChanged;
 
   @override
   State<_PropertiesSheet> createState() => _PropertiesSheetState();
 }
 
 class _PropertiesSheetState extends State<_PropertiesSheet> {
-  late String _text = widget.text;
+  late String _now = widget.text;
+
+  String get _text => _now;
+
+  /// Each change, kept at once.
+  set _text(String next) {
+    if (next == _now) return;
+    _now = next;
+    widget.onChanged(next);
+  }
   final _fields = <String, TextEditingController>{};
 
   @override
@@ -116,10 +126,7 @@ class _PropertiesSheetState extends State<_PropertiesSheet> {
             child: Row(children: [
               Expanded(child: Text('Properties', style: theme.textTheme.titleLarge)),
               TextButton.icon(onPressed: _add, icon: const Icon(Icons.add_rounded), label: const Text('Add')),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, _text == widget.text ? null : _text),
-                child: const Text('Done'),
-              ),
+              FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Done')),
             ]),
           ),
           Expanded(

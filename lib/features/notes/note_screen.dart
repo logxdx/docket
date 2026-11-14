@@ -462,10 +462,11 @@ class _NoteScreenState extends State<NoteScreen> {
   Future<void> _properties() async {
     await _flush();
     if (!mounted) return;
-    final next = await editProperties(context, _text.text);
-    if (next == null || !mounted) return;
-    setState(() => _text.text = next);
-    _changed(next);
+    await editProperties(context, _text.text, (next) {
+      if (!mounted) return;
+      setState(() => _text.text = next);
+      _changed(next);
+    });
     await _flush();
   }
 
@@ -994,7 +995,7 @@ class _NoteScreenState extends State<NoteScreen> {
             ])
           : ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 32), children: [
               if (journal != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: journal),
-              if (hasProperties(_text.text)) _Properties(text: _text.text),
+              if (hasProperties(_text.text)) _Properties(text: _text.text, onEdit: readOnly ? null : _properties),
               // Task links are numbered over the whole note, and footnotes and comments read across it, before it
               // is cut into parts.
               for (final (i, part) in noteParts(forReading(withoutProperties(taskLinks(_text.text, taskScheme)))).indexed)
@@ -1233,19 +1234,50 @@ class _Toolbar extends StatelessWidget {
 /// its front-matter tags. The rest (the title is the note's name) stays in the
 /// text, for the editor.
 class _Properties extends StatelessWidget {
-  const _Properties({required this.text});
+  const _Properties({required this.text, this.onEdit});
 
   final String text;
+
+  /// Opens the properties editor (null: read only).
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final description = propertyText(text, 'description') ?? '';
     final tags = propertyTags(text);
-    if (description.isEmpty && tags.isEmpty) return const SizedBox.shrink();
+    // The rest, as Obsidian lists them: name and value (the title is the note's name; description and tags have
+    // their own looks).
+    final others = [
+      for (final k in propertyKeys(text))
+        if (!const {'title', 'description', 'tags', 'tag'}.contains(k))
+          (k, propertyKind(text, k) == 'list' ? propertyList(text, k).join(', ') : propertyText(text, k) ?? ''),
+    ];
+    if (description.isEmpty && tags.isEmpty && others.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (others.isNotEmpty)
+          InkWell(
+            onTap: onEdit,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                for (final (k, v) in others)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      SizedBox(
+                        width: 110,
+                        child: Text(k, style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                      ),
+                      Expanded(child: Text(v.isEmpty ? '—' : v, style: theme.textTheme.bodyMedium)),
+                    ]),
+                  ),
+              ]),
+            ),
+          ),
         if (description.isNotEmpty)
           SelectableText(description,
               style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.45)),
