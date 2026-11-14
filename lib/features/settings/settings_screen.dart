@@ -20,7 +20,7 @@ import '../../core/voice/spoken.dart' show Engine;
 part 'ai_screen.dart';
 
 /// The app's version, as pubspec.yaml has it.
-const appVersion = '0.1.0';
+const appVersion = '0.2.0';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
