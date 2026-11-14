@@ -54,8 +54,9 @@ class Enricher {
     // A recording still being processed is named when it is done.
     if (note.text.contains('<!-- notes:transcribing ')) return path;
     // A template is copied into new notes: its front matter is the user's to write.
-    if (note.folder == 'Templates' || note.folder.startsWith('Templates/')) return path;
-    final daily = note.folder == 'Daily';
+    final templates = notebook.templatesFolder, days = notebook.dailyFolder;
+    if (note.folder == templates || note.folder.startsWith('$templates/')) return path;
+    final daily = note.folder == days || note.folder.startsWith('$days/');
     try {
       var text = await withEmojis(note.text, daily: daily);
       final prose = proseOf(text);

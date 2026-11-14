@@ -22,10 +22,6 @@ const journalPrompts = [
   'What do I want to remember about today?',
 ];
 
-/// Whether [path] is the daily note for [now] (`Daily/YYYY-MM-DD.md`).
-bool isTodaysNote(String path, DateTime now) =>
-    path == 'Daily/${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}.md';
-
 /// The day's [count] prompts, chosen by the date, the ones already in
 /// [text] left out.
 List<String> promptsFor(DateTime day, String text, {int count = 3}) {

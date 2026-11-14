@@ -13,6 +13,9 @@ void main() {
     expect(fileName('What: a/b?'), 'What a b');
     expect(applyTemplate('# {{title}} on {{date}} {{time}}', title: 'T', now: DateTime(2026, 10, 24, 9, 5)),
         '# T on 2026-10-24 09:05');
+    expect(applyTemplate('{{date:dddd, MMMM Do YYYY}} {{time:h:mm A}} w{{date:ww}} [{{date:[Q]Q}}]', title: 'T',
+            now: DateTime(2026, 10, 24, 21, 5)),
+        'Saturday, October 24th 2026 9:05 PM w43 [Q4]');
   });
 
   test('a placeholder title gives way to the heading or first line', () {

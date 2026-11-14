@@ -359,7 +359,7 @@ class _NoteScreenState extends State<NoteScreen> {
     if (after.length != before.length + 1 || at <= 0 || at > after.length || after[at - 1] != '\n') return;
     final lineStart = after.lastIndexOf('\n', at - 2) + 1;
     final line = after.substring(lineStart, at - 1);
-    final spot = emojiSpots(line, daily: _path.startsWith('Daily/')).firstOrNull;
+    final spot = emojiSpots(line, daily: _path.startsWith('${_book.dailyFolder}/')).firstOrNull;
     if (spot == null) return;
     final enricher = _enricher;
     unawaited(() async {
@@ -631,7 +631,7 @@ class _NoteScreenState extends State<NoteScreen> {
     final backlinks = note == null ? const <Note>[] : book.backlinks(note);
     final headingsSeen = <String, int>{};
     final readOnly = book.readOnly;
-    final prompts = readOnly || !isTodaysNote(_path, DateTime.now()) ? const <String>[] : promptsFor(DateTime.now(), _text.text);
+    final prompts = readOnly || book.dailyPath(DateTime.now()) != _path ? const <String>[] : promptsFor(DateTime.now(), _text.text);
     final journal = prompts.isEmpty
         ? null
         : SizedBox(

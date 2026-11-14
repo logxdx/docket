@@ -174,3 +174,14 @@ List<({int level, String title, int line})> headingsOf(String text) {
   }
   return out;
 }
+
+/// Words and characters in a note's text, as Obsidian's word count shows them: its body, without properties or
+/// comments; each CJK character a word of its own.
+({int words, int characters}) countWords(String body) {
+  final text = stripComments(body);
+  final cjk = RegExp(r'[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]');
+  final words = RegExp(r"[\p{L}\p{N}][\p{L}\p{N}'’_-]*", unicode: true)
+      .allMatches(text.replaceAll(cjk, ' '))
+      .length;
+  return (words: words + cjk.allMatches(text).length, characters: text.trim().length);
+}

@@ -153,3 +153,56 @@ String _unquote(String v) {
   // A plain scalar ends at a comment.
   return v.replaceFirst(RegExp(r'\s+#.*$'), '');
 }
+
+/// The front matter's keys, in order.
+List<String> propertyKeys(String text) => [
+      for (final l in _lines(text) ?? const <String>[])
+        if (RegExp(r'^([^\s:#-][^:]*?)[ \t]*:(?:[ \t]|$)').firstMatch(l) case final m?) m[1]!,
+    ];
+
+/// What kind of value [key] holds, as Obsidian's property types: 'list', 'checkbox', 'number', 'date',
+/// 'datetime' or 'text'.
+String propertyKind(String text, String key) {
+  final lines = _lines(text);
+  final span = lines == null ? null : _span(lines, key);
+  if (span == null) return 'text';
+  final first = lines![span.start];
+  final inline = first.substring(first.indexOf(':') + 1).trim();
+  if (span.end > span.start + 1 || (inline.startsWith('[') && inline.endsWith(']'))) return 'list';
+  final v = _unquote(inline);
+  if (v == 'true' || v == 'false') return 'checkbox';
+  if (RegExp(r'^-?\d+(\.\d+)?$').hasMatch(v)) return 'number';
+  if (RegExp(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}').hasMatch(v)) return 'datetime';
+  if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(v)) return 'date';
+  return 'text';
+}
+
+/// [text] with [key] set to [value]: a list (as "- item" lines), a bool or number (plain), or text; the key
+/// is added at the end when new. Front matter is made when the note has none.
+String withPropertyValue(String text, String key, Object value) {
+  final lines = _lines(text) ?? <String>[];
+  final body = _lines(text) == null ? text : withoutProperties(text);
+  final rendered = switch (value) {
+    List<String>() => ['$key:', for (final v in value) '  - ${yamlScalar(v)}'],
+    bool() || num() => ['$key: $value'],
+    _ => ['$key: ${yamlScalar('$value')}'],
+  };
+  final span = _span(lines, key);
+  final out = [...lines];
+  if (span == null) {
+    out.addAll(rendered);
+  } else {
+    out.replaceRange(span.start, span.end, rendered);
+  }
+  return '---\n${out.join('\n')}\n---\n$body';
+}
+
+/// [text] without the property [key]; without front matter when it was the last.
+String withoutProperty(String text, String key) {
+  final lines = _lines(text);
+  final span = lines == null ? null : _span(lines, key);
+  if (span == null) return text;
+  final out = [...lines!]..removeRange(span.start, span.end);
+  final body = withoutProperties(text);
+  return out.isEmpty ? body : '---\n${out.join('\n')}\n---\n$body';
+}

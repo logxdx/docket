@@ -11,7 +11,9 @@ import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 
 import 'bookmarks.dart';
+import 'moment.dart';
 import 'properties.dart';
+import 'recovery.dart';
 import 'search.dart';
 import 'vault.dart';
 
@@ -83,14 +85,9 @@ Set<String> parseTags(String text) => {
 /// [text] without YAML front matter.
 String _body(String text) => withoutProperties(text);
 
-/// [template] for a new note: {{date}}, {{time}}, {{title}} filled in.
-String applyTemplate(String template, {required String title, required DateTime now}) => template
-    .replaceAll('{{title}}', title)
-    .replaceAll('{{date}}', _day(now))
-    .replaceAll('{{time}}', '${_two(now.hour)}:${_two(now.minute)}');
-
-String _two(int n) => n.toString().padLeft(2, '0');
-String _day(DateTime d) => '${d.year}-${_two(d.month)}-${_two(d.day)}';
+/// [template] for a new note: {{title}}, {{date}}, {{time}} and {{date:FORMAT}} filled in, as Obsidian does.
+String applyTemplate(String template, {required String title, required DateTime now}) =>
+    fillTemplate(template, title: title, now: now);
 
 /// A file name from a title: what a file system will not take, removed.
 String fileName(String title) {
@@ -99,7 +96,10 @@ String fileName(String title) {
 }
 
 class Notebook extends ChangeNotifier {
-  Notebook(this.vault, {this.cache});
+  Notebook(this.vault, {this.cache, this.snapshots});
+
+  /// File recovery: copies of notes as they change (null: none kept).
+  final Snapshots? snapshots;
 
   Vault vault;
 
@@ -182,6 +182,10 @@ class Notebook extends ChangeNotifier {
     for (final n in _notes.values) {
       if (n.title.toLowerCase() == want || n.path.toLowerCase() == '$want.md') return n;
     }
+    // A note's alias (its `aliases:` property) names it too.
+    for (final n in _notes.values) {
+      if (propertyList(n.text, 'aliases').any((a) => a.toLowerCase() == want)) return n;
+    }
     return null;
   }
 
@@ -246,6 +250,7 @@ class Notebook extends ChangeNotifier {
     _notes.remove(note.path);
     final moved = Note(file: file, text: note.text);
     _notes[path] = moved;
+    snapshots?.moved(note.path, path);
     await _relinkPaths({_noExt(note.path): _noExt(path)});
     await _bookmarksMoved({note.path: path});
     _saveCache();
@@ -408,10 +413,46 @@ class Notebook extends ChangeNotifier {
     return clean;
   }
 
-  /// Notes in Templates/.
-  List<Note> get templates => [for (final n in notes) if (n.folder == 'Templates' || n.folder.startsWith('Templates/')) n];
+  /// Where templates are (Obsidian's Templates plugin setting).
+  String templatesFolder = 'Templates';
+
+  /// Daily notes, as Obsidian's Daily notes plugin sets them: their folder, their name as a Moment date format,
+  /// and the template a new one starts from ('' : the template called "Daily", if there is one).
+  String dailyFolder = 'Daily';
+  String dailyFormat = 'YYYY-MM-DD';
+  String dailyTemplate = '';
+
+  /// Notes in the templates folder.
+  List<Note> get templates =>
+      [for (final n in notes) if (n.folder == templatesFolder || n.folder.startsWith('$templatesFolder/')) n];
+
+  /// The daily note's path for [day].
+  String dailyPath(DateTime day) =>
+      // A format with "/" makes folders, as in Obsidian ("YYYY/MM/YYYY-MM-DD").
+      _join(dailyFolder, '${formatMoment(day, dailyFormat).split('/').map(fileName).join('/')}.md');
+
+  /// The daily notes there are, oldest first.
+  List<Note> get dailies =>
+      [for (final n in _notes.values) if (n.folder == dailyFolder || n.folder.startsWith('$dailyFolder/')) n]
+        ..sort((a, b) => a.path.compareTo(b.path));
+
+  /// The daily note before (or after, [step] 1) [note], or null.
+  Note? adjacentDaily(Note note, int step) {
+    final all = dailies;
+    final i = all.indexWhere((n) => n.path == note.path);
+    final j = i + step;
+    return i < 0 || j < 0 || j >= all.length ? null : all[j];
+  }
 
   Future<Note> save(String path, String text) async {
+    final before = _notes[path]?.text;
+    if (before != null && before != text) {
+      try {
+        snapshots?.take(path, before);
+      } on Object {
+        // A copy not kept is no reason to lose the save.
+      }
+    }
     final file = await vault.write(path, text);
     final note = Note(file: file, text: text);
     _notes[file.path] = note;
@@ -440,12 +481,44 @@ class Notebook extends ChangeNotifier {
   /// the first time.
   Future<Note> daily([DateTime? now]) async {
     final day = now ?? DateTime.now();
-    final path = 'Daily/${_day(day)}.md';
+    final path = dailyPath(day);
     final existing = _notes[path];
     if (existing != null) return existing;
-    final template = templates.where((t) => t.title.toLowerCase() == 'daily').firstOrNull;
-    final text = template == null ? '# ${_day(day)}\n\n' : applyTemplate(template.text, title: _day(day), now: day);
+    final title = path.split('/').last.replaceFirst(RegExp(r'\.md$'), '');
+    final template = dailyTemplate.isNotEmpty
+        ? byPath(dailyTemplate.endsWith('.md') ? dailyTemplate : '$dailyTemplate.md') ?? byTitle(dailyTemplate)
+        : templates.where((t) => t.title.toLowerCase() == 'daily').firstOrNull;
+    final text = template == null ? '# $title\n\n' : applyTemplate(template.text, title: title, now: day);
     return save(path, text);
+  }
+
+  /// A note named by the time, as Obsidian's Unique note creator does ("202611140905"), in [folder].
+  Future<Note> createUnique({String folder = '', String format = 'YYYYMMDDHHmm', DateTime? now}) =>
+      create(formatMoment(now ?? DateTime.now(), format), folder: folder);
+
+  /// Note composer, merge: [source]'s text added to the end of [target] (its properties left behind), links to
+  /// [source] made links to [target], and [source] put in the trash.
+  Future<Note> merge(Note source, Note target) async {
+    final merged = '${target.text.trimRight()}\n\n${withoutProperties(source.text).trim()}\n';
+    await save(target.path, merged);
+    final link = RegExp(r'(!?)\[\[' + RegExp.escape(source.title) + r'((?:#[^\[\]|\n]*)?(?:\|[^\[\]\n]*)?)\]\]', caseSensitive: false);
+    for (final other in [..._notes.values]) {
+      if (other.path != source.path && other.text.contains(link)) {
+        await save(other.path, other.text.replaceAllMapped(link, (m) => '${m[1]}[[${target.title}${m[2]}]]'));
+      }
+    }
+    await trash(_notes[source.path] ?? source);
+    return _notes[target.path]!;
+  }
+
+  /// Note composer, extract: [start]..[end] of [note] made a new note called [title] (next to it), and a link to
+  /// it left in their place. Returns the new note.
+  Future<Note> extract(Note note, int start, int end, String title) async {
+    final part = note.text.substring(start, end).trim();
+    final made = await create(title, folder: note.folder, text: '$part\n');
+    final now = _notes[note.path] ?? note;
+    await save(note.path, now.text.replaceRange(start, end, '[[${made.title}]]'));
+    return made;
   }
 
   /// Rename [note] to [title] in its folder; links to it are updated.
@@ -456,6 +529,7 @@ class Notebook extends ChangeNotifier {
     if (_notes.containsKey(path)) throw StateError('A note called "$name" already exists');
     final file = await vault.move(note.file, path);
     _notes.remove(note.path);
+    snapshots?.moved(note.path, path);
     var moved = Note(file: file, text: note.text);
     _notes[path] = moved;
     // A `title:` property that was the old name follows the new one.
