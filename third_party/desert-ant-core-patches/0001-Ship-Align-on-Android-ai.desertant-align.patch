@@ -1,0 +1,1214 @@
+From f95cfa15256d7280dde160aa568dd9e4b530de79 Mon Sep 17 00:00:00 2001
+From: logx <iamvarun158@gmail.com>
+Date: Sat, 14 Nov 2026 09:03:37 +0530
+Subject: [PATCH 1/3] Ship Align on Android (ai.desertant:align)
+
+Align had no Android build because the Android core has no NFC: its host
+bridge only offers NFKC, and the lexical bytes must be NFC to match training.
+The Kotlin SDK now composes every word with java.text.Normalizer (Form.NFC)
+before writing the payload, and Lexical takes the text as already composed on
+Android (trim only). NFC and that trim commute, so the bytes are the ones the
+Apple and Linux paths compute.
+
+- Catalog: an .android files entry (the LiteRT stages plus the sidecars), and
+  the AlignAndroid dynamic product in Package.swift.
+- packages/align-kotlin: Align/AlignNative over the shared LoadedModel ABI,
+  WordTiming in and out, the same payload schema as Binding.swift and
+  align-node, JVM codec tests and an on-device suite.
+- LexicalNFCTests: shared NFC vectors (expected values from a third
+  implementation) that Foundation, the Android lexical path and
+  java.text.Normalizer are all held to, plus an end-to-end check that
+  decomposed and composed spellings refine identically.
+- manifest/docs: Kotlin SDK live; docs re-rendered.
+- Tools/dal.sh: DAL_SWIFT_SDKS_PATH lets a host keep the Swift SDK bundles
+  outside the home directory.
+---
+ Package.swift                                 |   7 +-
+ README.md                                     |   2 +-
+ Sources/Align/Catalog.swift                   |   4 +-
+ Sources/Align/Lexical.swift                   |  30 ++-
+ Tests/AlignTests/LexicalNFCTests.swift        | 107 +++++++++++
+ .../Resources/lexical_nfc_vectors.json        | 161 ++++++++++++++++
+ Tools/dal.sh                                  |  18 +-
+ docs/models/align.md                          |  22 ++-
+ manifest.json                                 |   2 +-
+ mise-tasks/build/android-natives              |   6 +-
+ mise-tasks/test/android                       |   6 +-
+ packages/align-kotlin/README.md               |  72 ++++++++
+ packages/align-kotlin/build.gradle.kts        |  20 ++
+ .../kotlin/ai/desertant/align/AlignTest.kt    | 174 ++++++++++++++++++
+ .../align-kotlin/src/main/AndroidManifest.xml |   5 +
+ .../main/kotlin/ai/desertant/align/Align.kt   | 168 +++++++++++++++++
+ .../kotlin/ai/desertant/align/AlignNative.kt  |  13 ++
+ .../ai/desertant/align/AlignCodecTest.kt      | 129 +++++++++++++
+ 18 files changed, 927 insertions(+), 19 deletions(-)
+ create mode 100644 Tests/AlignTests/LexicalNFCTests.swift
+ create mode 100644 Tests/AlignTests/Resources/lexical_nfc_vectors.json
+ create mode 100644 packages/align-kotlin/README.md
+ create mode 100644 packages/align-kotlin/build.gradle.kts
+ create mode 100644 packages/align-kotlin/src/androidTest/kotlin/ai/desertant/align/AlignTest.kt
+ create mode 100644 packages/align-kotlin/src/main/AndroidManifest.xml
+ create mode 100644 packages/align-kotlin/src/main/kotlin/ai/desertant/align/Align.kt
+ create mode 100644 packages/align-kotlin/src/main/kotlin/ai/desertant/align/AlignNative.kt
+ create mode 100644 packages/align-kotlin/src/test/kotlin/ai/desertant/align/AlignCodecTest.kt
+
+diff --git a/Package.swift b/Package.swift
+index ba710ae..7694d45 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -160,8 +160,7 @@ struct ModelPackage {
+     /// Apple-only models get no Android/Node/wasm products. `Title` is MLX, which has no other
+     /// platform, and a product promising an artifact that cannot load is worse than its absence.
+     var appleOnly: Bool = false
+-    /// Whether this model gets an `Android` dynamic library. `Align` has no `.android` artifact:
+-    /// the host bridge has no NFC, so the lexical bytes could not match training.
++    /// Whether this model gets an `Android` dynamic library.
+     var androidLibrary: Bool = true
+     /// Whether this model has a `Web/` entry point and so a wasm product.
+     var web: Bool = true
+@@ -254,8 +253,8 @@ let models: [ModelPackage] = [
+         testResources: [
+             .copy("Resources/golden.json"),
+             .copy("Resources/calibration_golden.json"),
+-        ],
+-        androidLibrary: false
++            .copy("Resources/lexical_nfc_vectors.json"),
++        ]
+     ),
+ ] + [
+     // Cards are written for a `Clip`, which `Transcript` declares. Declared unconditionally;
+diff --git a/README.md b/README.md
+index d8eba50..77a8c4d 100644
+--- a/README.md
++++ b/README.md
+@@ -31,7 +31,7 @@ let clean = try await Redact().redaction(of: "Email Anna at anna@example.hu.")
+ <!-- models:start -->
+ | Model | What it does | Platform | Docs |
+ | --- | --- | --- | --- |
+-| **Align** | Word-timestamp refinement for any transcript, on device. | Apple · Linux · Windows · Node | [SDK](https://github.com/Desert-Ant-Labs/desert-ant-core/blob/main/docs/models/align.md) [Model](https://huggingface.co/desert-ant-labs/align) |
++| **Align** | Word-timestamp refinement for any transcript, on device. | Apple · Android · Linux · Windows · Node | [SDK](https://github.com/Desert-Ant-Labs/desert-ant-core/blob/main/docs/models/align.md) [Model](https://huggingface.co/desert-ant-labs/align) |
+ | **Clear** | On-device speech enhancement: denoise, dereverb, and loudness-normalize. | Apple · Android · Linux · Windows · Web · Node | [SDK](https://github.com/Desert-Ant-Labs/desert-ant-core/blob/main/docs/models/clear.md) [Model](https://huggingface.co/desert-ant-labs/clear) |
+ | **Clips** | Short clips and highlights from talking video and audio: podcasts, interviews, meetings. On-device. | Apple · Linux · Windows | [SDK](https://github.com/Desert-Ant-Labs/desert-ant-core/blob/main/docs/models/clips.md) [Model](https://huggingface.co/desert-ant-labs/clips) |
+ | **Ear** | On-device spoken language identification across 102 languages. | Apple · Android · Linux · Windows · Web · Node | [SDK](https://github.com/Desert-Ant-Labs/desert-ant-core/blob/main/docs/models/ear.md) [Model](https://huggingface.co/desert-ant-labs/ear) |
+diff --git a/Sources/Align/Catalog.swift b/Sources/Align/Catalog.swift
+index 2346339..04507de 100644
+--- a/Sources/Align/Catalog.swift
++++ b/Sources/Align/Catalog.swift
+@@ -34,9 +34,11 @@ public enum AlignModel: ModelDeclaration {
+         platform == .apple ? coreMLOutput : tfliteOutput
+     }
+ 
+-    // No `.android` entry: the host bridge has no NFC and the lexical bytes must match training.
++    // Android runs the LiteRT stages. Its core has no NFC, so the Kotlin SDK composes each word
++    // before the payload and the lexical bytes still match training (see Lexical.normalize).
+     public static let files: [ModelPlatform: [String]] = [
+         .apple: [coarse + "/", fine + "/"] + sidecars,
++        .android: [coarseTFLite, fineTFLite] + sidecars,
+         .linux: [coarseTFLite, fineTFLite] + sidecars,
+         .windows: [coarseTFLite, fineTFLite] + sidecars,
+     ]
+diff --git a/Sources/Align/Lexical.swift b/Sources/Align/Lexical.swift
+index 4f25daa..c3da08d 100644
+--- a/Sources/Align/Lexical.swift
++++ b/Sources/Align/Lexical.swift
+@@ -4,17 +4,39 @@ enum Lexical {
+     static let context = 16
+     static let padByte: Int32 = 256
+ 
++    /// The training bytes for one word: trimmed, Unicode NFC, UTF-8.
++    ///
++    /// Android composes before the core sees the text. Its core links no ICU, and the host
++    /// bridge only offers NFKC, which folds ligatures and width variants and so changes the
++    /// bytes. The Kotlin SDK (packages/align-kotlin) NFC-normalizes every word with
++    /// java.text.Normalizer before writing the payload, so here the text is already composed
++    /// and must not be normalized again. NFC and this trim commute (no whitespace scalar
++    /// composes with what follows it, and the whitespace that NFC rewrites, U+2000 and U+2001,
++    /// stays whitespace), so composing first gives the same bytes. LexicalNFCTests holds both
++    /// paths to that.
+     static func normalize(_ s: String) -> [UInt8] {
++        #if os(Android)
++        return precomposedBytes(s)
++        #else
++        return Array(trimmed(s).nfc.utf8)
++        #endif
++    }
++
++    /// The bytes of text the caller has already put in NFC: the Android path.
++    static func precomposedBytes(_ s: String) -> [UInt8] { Array(trimmed(s).utf8) }
++
++    static func trimmed(_ s: String) -> String {
+         let trimmed = s.drop(while: { $0.isWhitespace || $0.isNewline })
+         let end = trimmed.lastIndex(where: { !($0.isWhitespace || $0.isNewline) }).map { trimmed.index(after: $0) } ?? trimmed.startIndex
+-        return Array(String(trimmed[trimmed.startIndex..<end]).nfc.utf8)
++        return String(trimmed[trimmed.startIndex..<end])
+     }
+ 
+     /// 32-length byte ids: [preceding last 16 | following first 16], PAD-filled.
+-    static func bytes(preceding: String, following: String) -> [Int32] {
++    static func bytes(preceding: String, following: String,
++                      encode: (String) -> [UInt8] = normalize) -> [Int32] {
+         var out = [Int32](repeating: padByte, count: 2 * context)
+-        let pk = Array(normalize(preceding).suffix(context))
+-        let fk = Array(normalize(following).prefix(context))
++        let pk = Array(encode(preceding).suffix(context))
++        let fk = Array(encode(following).prefix(context))
+         for i in 0..<pk.count { out[context - pk.count + i] = Int32(pk[i]) }
+         for i in 0..<fk.count { out[context + i] = Int32(fk[i]) }
+         return out
+diff --git a/Tests/AlignTests/LexicalNFCTests.swift b/Tests/AlignTests/LexicalNFCTests.swift
+new file mode 100644
+index 0000000..21faa22
+--- /dev/null
++++ b/Tests/AlignTests/LexicalNFCTests.swift
+@@ -0,0 +1,107 @@
++#if !os(WASI)
++import Foundation
++import Testing
++@_spi(AlignBindings) @testable import Align
++import TestSupport
++
++/// The Android core takes each word already in NFC (the Kotlin SDK composes it with
++/// java.text.Normalizer) and only trims it; every other platform trims and then composes in
++/// Swift. These pin that the two give the model the same lexical bytes. The expected NFC comes
++/// from a third implementation (Python's unicodedata), and packages/align-kotlin's unit tests
++/// hold java.text.Normalizer to the same file.
++@Suite struct LexicalNFCTests {
++    struct Vector: Decodable { let name: String; let input: String; let nfc: String; let nfcUTF8: String }
++    struct Vectors: Decodable { let vectors: [Vector] }
++
++    static let vectors: [Vector] = {
++        let url = Bundle.module.url(forResource: "lexical_nfc_vectors", withExtension: "json")!
++        return try! JSONDecoder().decode(Vectors.self, from: Data(contentsOf: url)).vectors
++    }()
++
++    static func hex(_ bytes: [UInt8]) -> String { bytes.map { String(format: "%02x", $0) }.joined() }
++
++    /// What the Kotlin SDK writes for a word: the vector's NFC, as java.text.Normalizer produces it.
++    static func composedOnHost(_ s: String) -> String {
++        guard let v = vectors.first(where: { $0.input == s }) else {
++            Issue.record("no vector for \(s.unicodeScalars.map { String($0.value, radix: 16) })")
++            return s
++        }
++        return v.nfc
++    }
++
++    @Test func vectorsLoad() {
++        #expect(Self.vectors.count > 20)
++        // The decomposed and composed spellings of a word are different strings to the bytes.
++        #expect(Array("cafe\u{301}".utf8) != Array("caf\u{e9}".utf8))
++    }
++
++    /// The fixture's NFC is what Foundation composes too, so the vectors describe this toolchain.
++    @Test(arguments: vectors.map(\.name))
++    func foundationAgreesWithTheVectors(_ name: String) throws {
++        let v = try #require(Self.vectors.first { $0.name == name })
++        #expect(Self.hex(Array(v.input.precomposedStringWithCanonicalMapping.utf8)) == v.nfcUTF8)
++        #expect(Self.hex(Array(v.nfc.utf8)) == v.nfcUTF8)
++    }
++
++    /// One word: the Apple/Linux path (trim, then compose) against the Android path (composed
++    /// by the host, then trimmed).
++    @Test(arguments: vectors.map(\.name))
++    func androidPathMatchesTheComposingPath(_ name: String) throws {
++        let v = try #require(Self.vectors.first { $0.name == name })
++        let composing = Lexical.normalize(v.input)
++        let android = Lexical.precomposedBytes(v.nfc)
++        #expect(Self.hex(android) == Self.hex(composing), "\(name)")
++    }
++
++    /// The whole 32-id feature a boundary gets, for neighbours that mix decomposed and composed
++    /// spellings, as `runCascade` builds it for a start and an end boundary.
++    @Test func boundaryBytesMatchForMixedSpellings() {
++        let words = ["cafe\u{301}", "caf\u{e9}", "cancio\u{301}n", "nac\u{327}a\u{303}o", "\u{304B}\u{3099}",
++                     "\u{1100}\u{1161}\u{11A8}", "Vie\u{302}\u{323}t", "\u{FB01}ne", "", " \t cafe\u{301} \n"]
++        for prev in words {
++            for next in words {
++                let composing = Lexical.bytes(preceding: prev, following: next)
++                let android = Lexical.bytes(preceding: Self.composedOnHost(prev), following: Self.composedOnHost(next),
++                                            encode: Lexical.precomposedBytes)
++                #expect(composing == android)
++            }
++        }
++    }
++
++    /// The decomposed and composed spellings of a word reach the model as the same bytes, on
++    /// either path, and an NFKC fold would not have.
++    @Test func decomposedAndComposedSpellingsAreOneFeature() {
++        let nfd = Lexical.bytes(preceding: "cafe\u{301}", following: "cancio\u{301}n")
++        let nfc = Lexical.bytes(preceding: "caf\u{e9}", following: "canci\u{f3}n")
++        #expect(nfd == nfc)
++        #expect(Array(nfc[16..<24]) == Array("canci\u{f3}n".utf8).map(Int32.init))
++        #expect(Lexical.normalize("\u{FB01}ne") != Array("fine".utf8))
++    }
++}
++
++/// The same contract through the whole cascade: a decomposed spelling refines exactly like the
++/// composed one. The composed times are printed for packages/align-kotlin's on-device suite
++/// (`ACCENTED_RECORDED`), which must reproduce them from decomposed input.
++@Suite(.serialized, .modelBacked) struct AccentedRefinementTests {
++    @Test func accentedWordsRefineTheSameDecomposed() async throws {
++        let files = try await ModelFixture.files(AlignModel.self)
++        let refiner = Align(assets: try await .align(files: files, computeUnits: .cpuOnly, revision: nil))
++        let audio = synthAudio(16000 * 5, 16000)
++        let composed = [WordTiming(text: "canci\u{F3}n", start: 0.8, end: 1.4),
++                        WordTiming(text: "m\u{E1}s", start: 1.6, end: 2.0),
++                        WordTiming(text: "a\u{F1}o", start: 2.3, end: 2.7),
++                        WordTiming(text: "caf\u{E9}", start: 3.0, end: 3.6)]
++        let decomposed = [WordTiming(text: "cancio\u{301}n", start: 0.8, end: 1.4),
++                          WordTiming(text: "ma\u{301}s", start: 1.6, end: 2.0),
++                          WordTiming(text: "an\u{303}o", start: 2.3, end: 2.7),
++                          WordTiming(text: "cafe\u{301}", start: 3.0, end: 3.6)]
++        let a = try await refiner.refine(composed, audio: audio, sampleRate: 16000, languageCode: "es")
++        let b = try await refiner.refine(decomposed, audio: audio, sampleRate: 16000, languageCode: "es")
++        #expect(a.map(\.start) == b.map(\.start))
++        #expect(a.map(\.end) == b.map(\.end))
++        #expect(a.map(\.refined) == b.map(\.refined))
++        print("accented recorded: " + a.map { "listOf(\($0.start), \($0.end))" }.joined(separator: ", ")
++              + " refined " + a.map { "\($0.refined)" }.joined(separator: ","))
++    }
++}
++#endif
+diff --git a/Tests/AlignTests/Resources/lexical_nfc_vectors.json b/Tests/AlignTests/Resources/lexical_nfc_vectors.json
+new file mode 100644
+index 0000000..31ca018
+--- /dev/null
++++ b/Tests/AlignTests/Resources/lexical_nfc_vectors.json
+@@ -0,0 +1,161 @@
++{
++  "_comment": "Unicode NFC vectors for Align's lexical bytes. Expected values from Python's unicodedata (Unicode 16.0.0); Swift (Foundation) and Kotlin (java.text.Normalizer) must both agree with them. See Tests/AlignTests/LexicalNFCTests.swift and packages/align-kotlin.",
++  "vectors": [
++    {
++      "name": "spanish e-acute decomposed",
++      "input": "cafe\u0301",
++      "nfc": "caf\u00e9",
++      "nfcUTF8": "636166c3a9"
++    },
++    {
++      "name": "spanish e-acute composed",
++      "input": "caf\u00e9",
++      "nfc": "caf\u00e9",
++      "nfcUTF8": "636166c3a9"
++    },
++    {
++      "name": "decomposed with surrounding whitespace",
++      "input": " \t cafe\u0301 \n",
++      "nfc": " \t caf\u00e9 \n",
++      "nfcUTF8": "200920636166c3a9200a"
++    },
++    {
++      "name": "spanish o-acute decomposed",
++      "input": "cancio\u0301n",
++      "nfc": "canci\u00f3n",
++      "nfcUTF8": "63616e6369c3b36e"
++    },
++    {
++      "name": "spanish a-acute decomposed",
++      "input": "ma\u0301s",
++      "nfc": "m\u00e1s",
++      "nfcUTF8": "6dc3a173"
++    },
++    {
++      "name": "spanish n-tilde decomposed",
++      "input": "Espan\u0303a",
++      "nfc": "Espa\u00f1a",
++      "nfcUTF8": "45737061c3b161"
++    },
++    {
++      "name": "portuguese cedilla and tilde decomposed",
++      "input": "nac\u0327a\u0303o",
++      "nfc": "na\u00e7\u00e3o",
++      "nfcUTF8": "6e61c3a7c3a36f"
++    },
++    {
++      "name": "french two decomposed accents",
++      "input": "e\u0301te\u0301",
++      "nfc": "\u00e9t\u00e9",
++      "nfcUTF8": "c3a974c3a9"
++    },
++    {
++      "name": "german umlaut decomposed",
++      "input": "u\u0308ber",
++      "nfc": "\u00fcber",
++      "nfcUTF8": "c3bc626572"
++    },
++    {
++      "name": "german sharp s untouched",
++      "input": "Stra\u00dfe",
++      "nfc": "Stra\u00dfe",
++      "nfcUTF8": "53747261c39f65"
++    },
++    {
++      "name": "vietnamese marks in canonical order",
++      "input": "Vie\u0323\u0302t",
++      "nfc": "Vi\u1ec7t",
++      "nfcUTF8": "5669e1bb8774"
++    },
++    {
++      "name": "vietnamese marks out of canonical order",
++      "input": "Vie\u0302\u0323t",
++      "nfc": "Vi\u1ec7t",
++      "nfcUTF8": "5669e1bb8774"
++    },
++    {
++      "name": "angstrom sign singleton",
++      "input": "\u212b",
++      "nfc": "\u00c5",
++      "nfcUTF8": "c385"
++    },
++    {
++      "name": "ohm sign singleton",
++      "input": "\u2126",
++      "nfc": "\u03a9",
++      "nfcUTF8": "cea9"
++    },
++    {
++      "name": "hangul conjoining jamo",
++      "input": "\u1100\u1161\u11a8",
++      "nfc": "\uac01",
++      "nfcUTF8": "eab081"
++    },
++    {
++      "name": "japanese dakuten decomposed",
++      "input": "\u304b\u3099",
++      "nfc": "\u304c",
++      "nfcUTF8": "e3818c"
++    },
++    {
++      "name": "cjk compatibility ideograph",
++      "input": "\uf900",
++      "nfc": "\u8c48",
++      "nfcUTF8": "e8b188"
++    },
++    {
++      "name": "devanagari composition exclusion",
++      "input": "\u0958",
++      "nfc": "\u0915\u093c",
++      "nfcUTF8": "e0a495e0a4bc"
++    },
++    {
++      "name": "non-bmp composition exclusion",
++      "input": "\ud834\udd5e",
++      "nfc": "\ud834\udd57\ud834\udd65",
++      "nfcUTF8": "f09d8597f09d85a5"
++    },
++    {
++      "name": "ligature kept (NFKC would fold it)",
++      "input": "\ufb01ne",
++      "nfc": "\ufb01ne",
++      "nfcUTF8": "efac816e65"
++    },
++    {
++      "name": "fullwidth kept (NFKC would fold it)",
++      "input": "\uff21\uff22",
++      "nfc": "\uff21\uff22",
++      "nfcUTF8": "efbca1efbca2"
++    },
++    {
++      "name": "en quad whitespace before decomposed word",
++      "input": "\u2000cafe\u0301",
++      "nfc": "\u2002caf\u00e9",
++      "nfcUTF8": "e28082636166c3a9"
++    },
++    {
++      "name": "combining mark after leading space",
++      "input": " \u0301abc",
++      "nfc": " \u0301abc",
++      "nfcUTF8": "20cc81616263"
++    },
++    {
++      "name": "emoji with skin tone",
++      "input": "\ud83d\udc4d\ud83c\udffd",
++      "nfc": "\ud83d\udc4d\ud83c\udffd",
++      "nfcUTF8": "f09f918df09f8fbd"
++    },
++    {
++      "name": "plain ascii",
++      "input": "hello",
++      "nfc": "hello",
++      "nfcUTF8": "68656c6c6f"
++    },
++    {
++      "name": "empty",
++      "input": "",
++      "nfc": "",
++      "nfcUTF8": ""
++    }
++  ]
++}
+diff --git a/Tools/dal.sh b/Tools/dal.sh
+index 1620327..c64d7ba 100644
+--- a/Tools/dal.sh
++++ b/Tools/dal.sh
+@@ -222,13 +222,29 @@ dal_swift_version() {
+ 
+ # SwiftPM's SDK directory varies by host: ~/.swiftpm (macOS), ~/.config/swiftpm
+ # (Linux), %LOCALAPPDATA%/org.swift.swiftpm (Windows), plus the sandboxed macOS
+-# location.
++# location. DAL_SWIFT_SDKS_PATH, when set, comes first and is where the tasks
++# install an SDK (dal_swift_sdk_install), for a host that keeps its toolchains
++# out of the home directory.
+ dal_swift_sdk_dirs() {
++    [ -n "${DAL_SWIFT_SDKS_PATH:-}" ] && printf '%s\n' "$DAL_SWIFT_SDKS_PATH"
+     printf '%s\n' "$HOME/.swiftpm/swift-sdks" "$HOME/.config/swiftpm/swift-sdks" \
+         "$HOME/Library/org.swift.swiftpm/swift-sdks" \
+         "${LOCALAPPDATA:-$HOME/AppData/Local}/org.swift.swiftpm/swift-sdks"
+ }
+ 
++# `swift sdk install`, into DAL_SWIFT_SDKS_PATH when it is set. The first argument
++# is the swift command (e.g. a pinned toolchain's), the rest go to `sdk install`.
++dal_swift_sdk_install() { # <swift> <bundle-or-url> [args...]
++    local swift="$1"
++    shift
++    if [ -n "${DAL_SWIFT_SDKS_PATH:-}" ]; then
++        mkdir -p "$DAL_SWIFT_SDKS_PATH"
++        "$swift" sdk install --swift-sdks-path "$DAL_SWIFT_SDKS_PATH" "$@"
++    else
++        "$swift" sdk install "$@"
++    fi
++}
++
+ # The Android ABIs to cross-compile, space-separated. The default is arm64-v8a
+ # alone because every machine, emulator and phone the team develops on is
+ # arm64. `all` means both. CI sets x86_64 for its emulator, and publish:maven
+diff --git a/docs/models/align.md b/docs/models/align.md
+index e7a0e68..b4eb640 100644
+--- a/docs/models/align.md
++++ b/docs/models/align.md
+@@ -7,7 +7,7 @@ Word-timestamp refinement for any transcript, on device.
+ 
+ | | |
+ | --- | --- |
+-| **Platforms** | iOS, macOS, tvOS, visionOS, Linux, Windows, Node |
++| **Platforms** | iOS, macOS, tvOS, visionOS, Android, Linux, Windows, Node |
+ | **Languages** | 9 |
+ | **Weights** | [v1.1.0](https://huggingface.co/desert-ant-labs/align/tree/v1.1.0) |
+ <!-- model:end -->
+@@ -29,6 +29,12 @@ The models are tiny, 560KB of compiled Core ML, and refine a typical result in a
+ 
+ Then add the `Align` product to your target.
+ 
++**Kotlin** ([requirements](../../README.md#android))
++
++```kotlin
++implementation("ai.desertant:align:4.3.0")
++```
++
+ **JavaScript** ([requirements](../../README.md#javascript-and-typescript))
+ 
+ ```bash
+@@ -48,6 +54,17 @@ guard try await align.isSupported(languageCode: "en") else { return words }
+ let fixed = try await align.refine(words, audio: samples, sampleRate: 16_000, languageCode: "en")
+ ```
+ 
++### Kotlin
++
++```kotlin
++val align = Align(context)                     // downloads on first use
++val fixed = align.refine(samples, 16_000.0, words, "en")   // words: List<WordTiming>
++fixed.filter { it.refined }                    // the words Align moved
++align.close()
++```
++
++The Kotlin SDK puts each word in Unicode NFC (`java.text.Normalizer`) before the model sees it, the form the model was trained on, so decomposed and composed spellings refine the same.
++
+ ### SpeechAnalyzer (Apple)
+ 
+ Add `StreamingRefiner` to Apple's SpeechAnalyzer pipeline. The refiner records the audio you pass to SpeechAnalyzer and corrects the word timestamps in the results:
+@@ -130,7 +147,7 @@ let offline = Align(directory: myModelDirectory)   // uses the files as they are
+ | `calibrator.bin` | Gradient-boosted trees | 70KB | Correction calibrator |
+ | `refiner_config.json` | JSON | tiny | Runtime config |
+ 
+-On Apple platforms, the Swift SDK downloads the compiled `.mlmodelc` stages, `mel_filters.bin`, `calibrator.bin` and `refiner_config.json`. On Linux, Windows and Node, the `.tflite` pair replaces the two `.mlmodelc` directories.
++On Apple platforms, the Swift SDK downloads the compiled `.mlmodelc` stages, `mel_filters.bin`, `calibrator.bin` and `refiner_config.json`. On Android, Linux, Windows and Node, the `.tflite` pair replaces the two `.mlmodelc` directories.
+ 
+ ## Inputs and outputs
+ 
+@@ -177,7 +194,6 @@ English, Spanish, French, Italian, Portuguese, German, Japanese, Korean, and Chi
+ - Numbers are the weakest case. On a small sample, refinement moved digit boundaries further from the reference than leaving them alone. Treat spoken numbers as unimproved until a larger sample settles the question.
+ - The Core ML and LiteRT runtimes can disagree by 10ms on the same audio. We test both runtimes against Core ML's recorded output on synthetic audio. Core ML on the CPU matches that output (0.0ms, against a 25ms tolerance). LiteRT drifts 10.4ms (linux-arm64, 2026-09-17). Don't expect the two runtimes to agree to below a millisecond.
+ - Align has no browser build. Align runs two models in sequence, and our WebAssembly build loads only one model.
+-- Align has no Android SDK.
+ 
+ <!-- model-footer:start -->
+ ## License
+diff --git a/manifest.json b/manifest.json
+index eeefb45..2e6aa0e 100644
+--- a/manifest.json
++++ b/manifest.json
+@@ -42,7 +42,7 @@
+       "home": "desert-ant-core",
+       "sdks": {
+         "swift": { "status": "live", "package": "Align", "platforms": ["apple", "linux", "windows"] },
+-        "kotlin": { "status": "none" },
++        "kotlin": { "status": "live", "package": "ai.desertant:align", "platforms": ["android"] },
+         "js": { "status": "live", "package": "@desert-ant-labs/align", "platforms": ["node"] }
+       },
+       "weights": {
+diff --git a/mise-tasks/build/android-natives b/mise-tasks/build/android-natives
+index 26a6acf..56e8e2c 100755
+--- a/mise-tasks/build/android-natives
++++ b/mise-tasks/build/android-natives
+@@ -122,7 +122,11 @@ find_bundle() {
+ bundle=$(find_bundle || true)
+ if [ -z "$bundle" ]; then
+     echo "Installing the official Android SDK for $snapshot (one-time, ~330 MB)..."
+-    swift_snapshot swift sdk install "$sdk_url" --checksum "$checksum"
++    if [ "$(dal_host_os)" = darwin ]; then
++        swift_snapshot swift sdk install "$sdk_url" --checksum "$checksum"
++    else
++        dal_swift_sdk_install "$toolchain/usr/bin/swift" "$sdk_url" --checksum "$checksum"
++    fi
+     bundle=$(find_bundle || true)
+ fi
+ [ -n "$bundle" ] || { echo "error: no Android SDK bundle for $snapshot after install" >&2; exit 1; }
+diff --git a/mise-tasks/test/android b/mise-tasks/test/android
+index 242adf5..ad92b24 100755
+--- a/mise-tasks/test/android
++++ b/mise-tasks/test/android
+@@ -56,9 +56,9 @@ swift_version=$(dal_swift_version)
+ bundle_name="swift-$swift_version-RELEASE_android.artifactbundle"
+ find_bundle() {
+     local dir
+-    for dir in "$HOME/.swiftpm/swift-sdks" "$HOME/.config/swiftpm/swift-sdks" "$HOME/Library/org.swift.swiftpm/swift-sdks"; do
++    while IFS= read -r dir; do
+         [ -d "$dir/$bundle_name" ] && { echo "$dir/$bundle_name"; return 0; }
+-    done
++    done < <(dal_swift_sdk_dirs)
+     return 1
+ }
+ bundle=$(find_bundle || true)
+@@ -67,7 +67,7 @@ if [ -z "$bundle" ]; then
+     tmp=$(mktemp -d)
+     curl -fSL -o "$tmp/sdk.tar.gz" \
+         "https://download.swift.org/swift-$swift_version-release/android-sdk/swift-$swift_version-RELEASE/$bundle_name.tar.gz"
+-    swift sdk install "$tmp/sdk.tar.gz"
++    dal_swift_sdk_install swift "$tmp/sdk.tar.gz"
+     rm -rf "$tmp"
+     bundle=$(find_bundle || true)
+ fi
+diff --git a/packages/align-kotlin/README.md b/packages/align-kotlin/README.md
+new file mode 100644
+index 0000000..759c0da
+--- /dev/null
++++ b/packages/align-kotlin/README.md
+@@ -0,0 +1,72 @@
++# ai.desertant:align
++
++Word-timestamp refinement for Android: pass the words any transcriber gave you
++and the audio they came from, and get the same words back with corrected start
++and end times. The full model page is [docs/models/align.md](../../docs/models/align.md).
++
++The AAR carries one Swift JNI library per ABI (`libAlignAndroid.so`, arm64-v8a
++and x86_64). LiteRT comes from `ai.desertant:core`, which this artifact depends
++on, so use it with the same version of core as every other `ai.desertant:*`
++model in the app.
++
++## Usage
++
++```kotlin
++import ai.desertant.align.Align
++import ai.desertant.align.WordTiming
++
++val align = Align(context)                      // or Align(context, "/path/to/model/dir")
++val words = listOf(WordTiming("hola", 0.40, 0.71), WordTiming("mundo", 0.80, 1.30))
++val fixed = align.refine(samples, 16_000.0, words, "es")   // suspend; runs off the main thread
++fixed.forEach { println("${it.text} ${it.start}-${it.end} refined=${it.refined}") }
++align.close()
++```
++
++- `Align(context: Context, directory: String? = null)`: construction is cheap. The model loads on the first `refine` or on `download()`.
++- `fun isDownloaded(): Boolean`: whether the model is usable with no network.
++- `suspend fun download()`: fetch the pinned revision into the app cache (or `directory`). A no-op once present.
++- `suspend fun refine(samples: FloatArray, sampleRate: Double, words: List<WordTiming>, languageCode: String): List<WordTiming>`: mono float samples at any rate (16 kHz avoids a resample). Returns the same words, in order and with your text, with `start`/`end` replaced and `refined` set. `refined = false` means the word kept its input times (unsupported language, or a correction that was not structurally safe).
++- `Align.LANGUAGES` / `Align.isSupported(code)`: de, en, es, fr, it, ja, ko, pt, zh. The code's first two letters are used (`"pt-BR"` is `pt`); anything else passes through unchanged.
++- `close()`: release the native model.
++
++Bad input (empty audio, a non-positive rate, a time that is not finite or is outside -1 to 10,000,000 s) throws `IllegalArgumentException`; a native failure throws `AlignException`.
++
++### Unicode
++
++The model's lexical features are the UTF-8 bytes of each word in Unicode NFC,
++the form it was trained on. The Android core has no NFC of its own (it links no
++ICU), so this SDK composes every word with `java.text.Normalizer` (`Form.NFC`)
++before handing it to the core, and the core uses those bytes as they are. A
++decomposed `"café"` and a composed `"café"` therefore refine
++identically, and the text you get back is your own, unchanged.
++
++## Offline use
++
++Point `directory` at a folder that already holds the model and nothing is
++downloaded. On Android the folder must contain exactly these files from the
++Hugging Face repo [`desert-ant-labs/align`](https://huggingface.co/desert-ant-labs/align/tree/v1.1.0)
++at revision **`v1.1.0`** (the revision this SDK pins):
++
++| File | What it is |
++| --- | --- |
++| `align-coarse.tflite` | Coarse cascade stage (LiteRT) |
++| `align-fine.tflite` | Fine cascade stage (LiteRT) |
++| `refiner_config.json` | Frontend geometry, language table, cascade widths |
++| `mel_filters.bin` | Log-mel filter bank |
++| `calibrator.bin` | Correction calibrator |
++
++The `.mlmodelc` directories in the same repo are the Apple build and are not
++needed. Put the five files flat in the folder, with no `.dal-meta` directory
++beside them: that marker means "downloaded by the SDK" and makes the folder be
++checked against the manifest the SDK wrote, instead of being adopted as is. (A
++folder the SDK downloaded into itself, `.dal-meta` and all, also works offline
++afterwards.) One way to fetch the set:
++
++```bash
++for f in align-coarse.tflite align-fine.tflite refiner_config.json mel_filters.bin calibrator.bin; do
++  curl -fL -o "$f" "https://huggingface.co/desert-ant-labs/align/resolve/v1.1.0/$f"
++done
++```
++
++The SDK's license check never blocks a model from loading; with no network it
++simply retries later.
+diff --git a/packages/align-kotlin/build.gradle.kts b/packages/align-kotlin/build.gradle.kts
+new file mode 100644
+index 0000000..0919851
+--- /dev/null
++++ b/packages/align-kotlin/build.gradle.kts
+@@ -0,0 +1,20 @@
++// Android library (AAR) for Align: ai.desertant:align. Everything structural comes
++// from the ai.desertant.model-sdk convention plugin (gradle-plugin/).
++plugins { id("ai.desertant.model-sdk") }
++
++desertAntSdk {
++    description = "On-device word-timestamp refinement for Android: correct the word " +
++        "times any transcriber proposes, against the audio."
++}
++
++// The fixtures live once, beside the Swift suite they were recorded for: the
++// unit tests read the NFC vectors, and the on-device suite the cascade golden.
++val alignFixtures = rootProject.file("Tests/AlignTests/Resources")
++android.sourceSets["test"].resources.srcDir(alignFixtures)
++android.sourceSets["androidTest"].assets.srcDir(alignFixtures)
++
++dependencies {
++    testImplementation("junit:junit:4.13.2")
++    // Only to read the shared JSON vectors; the AAR itself adds nothing to core's dependencies.
++    testImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
++}
+diff --git a/packages/align-kotlin/src/androidTest/kotlin/ai/desertant/align/AlignTest.kt b/packages/align-kotlin/src/androidTest/kotlin/ai/desertant/align/AlignTest.kt
+new file mode 100644
+index 0000000..2de76f6
+--- /dev/null
++++ b/packages/align-kotlin/src/androidTest/kotlin/ai/desertant/align/AlignTest.kt
+@@ -0,0 +1,174 @@
++package ai.desertant.align
++
++import androidx.test.ext.junit.runners.AndroidJUnit4
++import androidx.test.platform.app.InstrumentationRegistry
++import kotlinx.coroutines.test.runTest
++import org.json.JSONObject
++import org.junit.After
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertTrue
++import org.junit.Before
++import org.junit.Test
++import org.junit.runner.RunWith
++import java.io.File
++import kotlin.math.PI
++import kotlin.math.abs
++import kotlin.math.sin
++import kotlin.time.Duration.Companion.minutes
++
++/**
++ * Instrumented tests for the Android binding, exercising the real on-device path
++ * via JNI: the LiteRT runtime, the Swift frontend and cascade, and the
++ * static-stdlib runtime. The AAR ships no model, so the suite downloads the
++ * pinned revision into the app cache once and reuses it.
++ */
++@RunWith(AndroidJUnit4::class)
++class AlignTest {
++    private lateinit var align: Align
++
++    @Before fun setUp() {
++        align = Align(InstrumentationRegistry.getInstrumentation().targetContext)
++    }
++    @After fun tearDown() { if (::align.isInitialized) align.close() }
++
++    /** Tests/AlignTests' `synthAudio`, sample for sample. */
++    private fun synthAudio(n: Int, sr: Int): FloatArray = FloatArray(n) { i ->
++        val t = i.toDouble() / sr
++        val a = 0.3 * sin(2 * PI * 200 * t)
++        val b = 0.2 * sin(2 * PI * 350 * t)
++        val c = 0.1 * sin(2 * PI * 61 * t) * sin(2 * PI * 3 * t)
++        (a + b + c).toFloat()
++    }
++
++    private fun golden(): JSONObject {
++        val context = InstrumentationRegistry.getInstrumentation().context
++        return JSONObject(context.assets.open("golden.json").bufferedReader().use { it.readText() })
++    }
++
++    /**
++     * The cascade must give the corrections the Swift suite recorded for this
++     * audio (Tests/AlignTests/Resources/golden.json), within the LiteRT
++     * tolerance that suite uses (15 ms). Anything else means the frontend, the
++     * runtime or the payload differs on this platform.
++     */
++    @Test fun matchesTheRecordedCorrections() = runTest(timeout = 10.minutes) {
++        val g = golden()
++        val audio = synthAudio(g.getInt("n_samples"), g.getInt("sample_rate"))
++        val ws = g.getJSONArray("words")
++        val words = List(ws.length()) { i ->
++            val w = ws.getJSONObject(i)
++            WordTiming(w.getString("text"), w.getDouble("start"), w.getDouble("end"))
++        }
++        val corrections = g.getJSONArray("corrections")
++        val out = align.refine(audio, g.getInt("sample_rate").toDouble(), words, g.getString("language"))
++        assertEquals(words.size, out.size)
++        var checked = 0
++        for (i in words.indices) {
++            assertEquals(words[i].text, out[i].text)
++            if (!out[i].refined) continue
++            checked += 2
++            val cs = (out[i].start - words[i].start) * 1000
++            val ce = (out[i].end - words[i].end) * 1000
++            assertTrue("word $i start drifted: $cs vs ${corrections.getDouble(2 * i) * 1000}",
++                abs(cs - corrections.getDouble(2 * i) * 1000) < 15.0)
++            assertTrue("word $i end drifted: $ce vs ${corrections.getDouble(2 * i + 1) * 1000}",
++                abs(ce - corrections.getDouble(2 * i + 1) * 1000) < 15.0)
++        }
++        assertTrue("no word was refined, so nothing was compared", checked > 0)
++    }
++
++    /**
++     * The NFC contract end to end: a decomposed spelling reaches the model as
++     * the composed bytes, so the two refine identically, and both match what
++     * the Swift suite records for the composed spelling on Linux
++     * (AlignTests.accentedWordsRefineTheSameDecomposed).
++     */
++    @Test fun decomposedAccentsRefineLikeComposed() = runTest(timeout = 10.minutes) {
++        val audio = synthAudio(16_000 * 5, 16_000)
++        val composed = listOf(
++            WordTiming("canción", 0.8, 1.4), WordTiming("más", 1.6, 2.0),
++            WordTiming("año", 2.3, 2.7), WordTiming("café", 3.0, 3.6),
++        )
++        val decomposed = listOf(
++            WordTiming("canción", 0.8, 1.4), WordTiming("más", 1.6, 2.0),
++            WordTiming("año", 2.3, 2.7), WordTiming("café", 3.0, 3.6),
++        )
++        val a = align.refine(audio, 16_000.0, composed, "es")
++        val b = align.refine(audio, 16_000.0, decomposed, "es")
++        assertEquals(a.map { it.start }, b.map { it.start })
++        assertEquals(a.map { it.end }, b.map { it.end })
++        assertEquals(a.map { it.refined }, b.map { it.refined })
++        // The caller's own spelling comes back.
++        assertEquals(decomposed.map { it.text }, b.map { it.text })
++        for ((i, expected) in ACCENTED_RECORDED.withIndex()) {
++            val got = listOf(a[i].start, a[i].end)
++            assertTrue("word $i: $got vs recorded $expected",
++                abs(got[0] - expected[0]) * 1000 < 15.0 && abs(got[1] - expected[1]) * 1000 < 15.0)
++        }
++    }
++
++    @Test fun unsupportedLanguagePassesThrough() = runTest(timeout = 10.minutes) {
++        val words = listOf(WordTiming("hallo", 0.5, 0.9), WordTiming("wereld", 1.0, 1.5))
++        val out = align.refine(synthAudio(16_000 * 2, 16_000), 16_000.0, words, "nl")
++        assertEquals(words, out)
++        assertFalse(Align.isSupported("nl"))
++    }
++
++    @Test fun resamplesRatherThanRefusing() = runTest(timeout = 10.minutes) {
++        val words = listOf(WordTiming("hola", 0.4, 0.71), WordTiming("mundo", 0.8, 1.3))
++        val out = align.refine(synthAudio(44_100 * 3, 44_100), 44_100.0, words, "es")
++        assertEquals(2, out.size)
++        assertTrue(out.all { it.start < it.end })
++    }
++
++    @Test fun reportsWhetherTheModelIsPresent() = runTest(timeout = 10.minutes) {
++        align.download()
++        assertTrue("the model reports itself missing after a successful download", align.isDownloaded())
++    }
++
++    /** A directory that already holds the files is adopted as-is: the offline path an app ships. */
++    @Test fun adoptsAPopulatedDirectory() = runTest(timeout = 10.minutes) {
++        val context = InstrumentationRegistry.getInstrumentation().targetContext
++        val downloaded = File(context.filesDir, "align-download").apply { deleteRecursively(); mkdirs() }
++        Align(context, downloaded.absolutePath).use { it.download() }
++        val names = downloaded.walkTopDown().filter { it.isFile }.map { it.name }.toSet()
++        for (f in OFFLINE_FILES) assertTrue("$f missing from $names", f in names)
++        // What an app ships: only the five files, flat, with none of the SDK's download bookkeeping.
++        val dir = File(context.filesDir, "align-adopt").apply { deleteRecursively(); mkdirs() }
++        for (f in OFFLINE_FILES) File(downloaded, f).copyTo(File(dir, f))
++        downloaded.deleteRecursively()
++        Align(context, dir.absolutePath).use { adopted ->
++            assertTrue(adopted.isDownloaded())
++            val out = adopted.refine(synthAudio(16_000 * 2, 16_000), 16_000.0,
++                listOf(WordTiming("hello", 0.4, 0.8)), "en")
++            assertEquals(1, out.size)
++        }
++        dir.deleteRecursively()
++    }
++
++    @Test fun invalidInputIsRejected() = runTest {
++        for (block in listOf<suspend () -> Unit>(
++            { align.refine(FloatArray(0), 16_000.0, listOf(WordTiming("a", 0.0, 1.0)), "en") },
++            { align.refine(FloatArray(10), 0.0, listOf(WordTiming("a", 0.0, 1.0)), "en") },
++            { align.refine(FloatArray(10), 16_000.0, listOf(WordTiming("a", Double.NaN, 1.0)), "en") },
++        )) {
++            var threw = false
++            try { block() } catch (e: IllegalArgumentException) { threw = true }
++            assertTrue(threw)
++        }
++    }
++
++    private companion object {
++        /** The files a model directory must hold on Android (Sources/Align/Catalog.swift, `.android`). */
++        val OFFLINE_FILES = listOf(
++            "align-coarse.tflite", "align-fine.tflite", "refiner_config.json", "mel_filters.bin", "calibrator.bin",
++        )
++
++        /** [start, end] per word for the composed spelling, recorded by the Swift suite on linux-x64 LiteRT. */
++        val ACCENTED_RECORDED: List<List<Double>> = listOf(
++            listOf(1.2805355966091156, 1.3532125145196914), listOf(1.6238725021481515, 1.8827151358127594),
++            listOf(2.267778496444225, 2.6171484112739565), listOf(3.052574973553419, 3.514546310901642),
++        )
++    }
++}
+diff --git a/packages/align-kotlin/src/main/AndroidManifest.xml b/packages/align-kotlin/src/main/AndroidManifest.xml
+new file mode 100644
+index 0000000..b7d29dc
+--- /dev/null
++++ b/packages/align-kotlin/src/main/AndroidManifest.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<manifest xmlns:android="http://schemas.android.com/apk/res/android">
++    <!-- Needed for the on-demand model download; a directory you pre-populate uses no network. -->
++    <uses-permission android:name="android.permission.INTERNET" />
++</manifest>
+diff --git a/packages/align-kotlin/src/main/kotlin/ai/desertant/align/Align.kt b/packages/align-kotlin/src/main/kotlin/ai/desertant/align/Align.kt
+new file mode 100644
+index 0000000..46f5d1b
+--- /dev/null
++++ b/packages/align-kotlin/src/main/kotlin/ai/desertant/align/Align.kt
+@@ -0,0 +1,168 @@
++package ai.desertant.align
++
++import ai.desertant.core.FfiReader
++import ai.desertant.core.FfiWriter
++import ai.desertant.core.LoadedModel
++import java.text.Normalizer
++
++/** The catalog id, which is how the shared native layer is asked for Align. */
++private const val MODEL_ID = "align"
++private const val MODEL_NAME = "Align"
++
++/** The rate the model works at. Audio at any other rate is resampled. */
++const val SAMPLE_RATE: Double = 16_000.0
++
++/**
++ * A word and when it sounds, in seconds from the beginning of the audio. The
++ * same shape goes in and comes out: [Align.refine] returns your words with
++ * corrected [start] and [end].
++ */
++data class WordTiming(
++    val text: String,
++    val start: Double,
++    val end: Double,
++    /**
++     * True when the refiner moved this word. False means it kept the times you
++     * passed in, as a safe fallback (unsupported language, a correction that
++     * hit the search edge or would end before it starts, or a word past the end
++     * of the audio).
++     */
++    val refined: Boolean = false,
++)
++
++class AlignException(message: String) : Exception(message)
++
++/**
++ * On-device word-timestamp refinement for any transcript: audio and the times a
++ * recognizer proposed in, corrected times out. Mirrors the iOS/Swift SDK:
++ * create one `Align` and reuse it; the model loads lazily on the first [refine]
++ * (or eagerly via [download]).
++ *
++ * ```kotlin
++ * val align = Align(context)                     // downloads on first use
++ * val words = align.refine(samples, 16_000.0, transcriberWords, "en")
++ * align.close()
++ * ```
++ *
++ * @param directory the model's home. Files already there are adopted (so an app
++ *   that ships the model just points at the folder it unpacked it into),
++ *   otherwise the model is downloaded into it. Omit to use the app cache.
++ */
++class Align(
++    context: android.content.Context,
++    directory: String? = null,
++) : AutoCloseable {
++    private val model = LoadedModel(MODEL_ID, MODEL_NAME, context, directory, ::AlignException, AlignNative)
++
++    companion object {
++        /** The language codes the model was trained on (the shipped refiner_config.json's keys). */
++        val LANGUAGES: List<String> = listOf("de", "en", "es", "fr", "it", "ja", "ko", "pt", "zh")
++
++        /** True when [refine] corrects times for this language; false means passthrough. */
++        fun isSupported(languageCode: String): Boolean = AlignCodec.languageKey(languageCode) in LANGUAGES
++    }
++
++    /** Whether the model is usable with no network. */
++    fun isDownloaded(): Boolean = model.isDownloaded()
++
++    /**
++     * Download the model ahead of time so the first [refine] is instant. A
++     * no-op once available (see [isDownloaded]). Suspends on a background
++     * dispatcher.
++     */
++    suspend fun download() = model.download()
++
++    /**
++     * Refine the [words] a transcriber produced for mono [samples] at
++     * [sampleRate], in [languageCode] (BCP-47 or a bare ISO code: "en",
++     * "pt-BR"). Returns the same words, in order and with the same text, with
++     * `start` and `end` replaced and [WordTiming.refined] set. An unsupported
++     * language passes the words through unchanged.
++     *
++     * Every `start` and `end` must be finite and within -1 to 10,000,000
++     * seconds, [sampleRate] finite and positive, and [samples] non-empty;
++     * otherwise this throws [IllegalArgumentException] naming the word.
++     */
++    suspend fun refine(
++        samples: FloatArray,
++        sampleRate: Double,
++        words: List<WordTiming>,
++        languageCode: String,
++    ): List<WordTiming> {
++        AlignCodec.validate(samples, sampleRate, words)
++        if (words.isEmpty()) return words
++        val input = AlignCodec.encodeInput(samples, sampleRate, words)
++        val options = AlignCodec.encodeOptions(languageCode)
++        return model.run(input, options, failureMessage = "timestamp refinement failed") { r ->
++            AlignCodec.decodeResult(r, words)
++        }
++    }
++
++    /** Release the model. The refiner is unusable afterwards. */
++    override fun close() = model.close()
++}
++
++/**
++ * Align's FFI payload schemas, mirroring the reader/writer in
++ * Sources/Align/Binding.swift and packages/align-node/codec.js.
++ */
++internal object AlignCodec {
++    /** The time range a word may carry, in seconds: the same bounds as Swift's `Align.validate`. */
++    const val MIN_SECONDS = -1.0
++    const val MAX_SECONDS = 10_000_000.0
++
++    /** The same two-letter key rule as Swift's `Align.key`. */
++    fun languageKey(languageCode: String): String = languageCode.take(2).lowercase(java.util.Locale.ROOT)
++
++    /**
++     * The core checks the same rules, but its failure crosses JNI as a bare
++     * "failed", so reject here with a message that names the word.
++     */
++    fun validate(samples: FloatArray, sampleRate: Double, words: List<WordTiming>) {
++        require(samples.isNotEmpty()) { "the audio is empty" }
++        require(sampleRate.isFinite() && sampleRate > 0) {
++            "sampleRate is $sampleRate, expected a finite positive rate"
++        }
++        words.forEachIndexed { i, word ->
++            for ((name, t) in listOf("start" to word.start, "end" to word.end)) {
++                require(t.isFinite() && t >= MIN_SECONDS && t <= MAX_SECONDS) {
++                    "word $i $name is $t, expected a time from $MIN_SECONDS to $MAX_SECONDS seconds"
++                }
++            }
++        }
++    }
++
++    /**
++     * The model's lexical features are the UTF-8 bytes of each word in Unicode
++     * NFC, the form it was trained on (Sources/Align/Lexical.swift). Apple and
++     * Linux compose in Swift through Foundation; the Android core links no ICU
++     * and its host bridge only offers NFKC, which would fold ligatures and
++     * width variants and change the bytes. So the composition happens here, with
++     * the platform's own normalizer, and the Android core takes the text as
++     * already composed (Lexical's `os(Android)` branch). Only the bytes sent to
++     * the model change: [refine] hands back the caller's own text.
++     */
++    fun lexicalText(text: String): String = Normalizer.normalize(text, Normalizer.Form.NFC)
++
++    /** Input payload: `f32Array samples`, `f64 sampleRate`, `u32 wordCount`, then text/start/end per word. */
++    fun encodeInput(samples: FloatArray, sampleRate: Double, words: List<WordTiming>): ByteArray {
++        val w = FfiWriter().floats(samples).double(sampleRate).int(words.size)
++        for (word in words) w.string(lexicalText(word.text)).double(word.start).double(word.end)
++        return w.done()
++    }
++
++    /** Options payload: the language string. The core treats a code it does not know as a passthrough. */
++    fun encodeOptions(languageCode: String): ByteArray = FfiWriter().string(languageCode).done()
++
++    /** Result payload: `u32 wordCount`, then `f64 start`, `f64 end`, `u32 refined` per word. */
++    fun decodeResult(r: FfiReader, words: List<WordTiming>): List<WordTiming> {
++        val n = r.int()
++        if (n != words.size) throw AlignException("the core returned $n words for ${words.size}")
++        return words.map { word ->
++            val start = r.double()
++            val end = r.double()
++            val refined = r.int() == 1
++            word.copy(start = start, end = end, refined = refined)
++        }
++    }
++}
+diff --git a/packages/align-kotlin/src/main/kotlin/ai/desertant/align/AlignNative.kt b/packages/align-kotlin/src/main/kotlin/ai/desertant/align/AlignNative.kt
+new file mode 100644
+index 0000000..65c9dbc
+--- /dev/null
++++ b/packages/align-kotlin/src/main/kotlin/ai/desertant/align/AlignNative.kt
+@@ -0,0 +1,13 @@
++package ai.desertant.align
++
++import ai.desertant.core.NativeLibraries
++import ai.desertant.core.NativeModelApi
++
++internal object AlignNative : NativeModelApi {
++    override fun ensureLoaded() = NativeLibraries.loadModel("AlignAndroid")
++    override external fun create(modelId: ByteArray, cacheRoot: ByteArray?, directory: ByteArray?): Long
++    override external fun destroy(handle: Long)
++    override external fun isDownloaded(handle: Long): Int
++    override external fun download(handle: Long): Int
++    override external fun run(handle: Long, input: ByteArray, options: ByteArray?): ByteArray?
++}
+diff --git a/packages/align-kotlin/src/test/kotlin/ai/desertant/align/AlignCodecTest.kt b/packages/align-kotlin/src/test/kotlin/ai/desertant/align/AlignCodecTest.kt
+new file mode 100644
+index 0000000..2b67b5a
+--- /dev/null
++++ b/packages/align-kotlin/src/test/kotlin/ai/desertant/align/AlignCodecTest.kt
+@@ -0,0 +1,129 @@
++package ai.desertant.align
++
++import ai.desertant.core.FfiReader
++import ai.desertant.core.FfiWriter
++import kotlinx.serialization.json.Json
++import kotlinx.serialization.json.jsonArray
++import kotlinx.serialization.json.jsonObject
++import kotlinx.serialization.json.jsonPrimitive
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNotEquals
++import org.junit.Assert.assertTrue
++import org.junit.Assert.fail
++import org.junit.Test
++import java.nio.ByteBuffer
++
++/**
++ * The payload half of the SDK, on the host JVM. The vectors are the ones the
++ * Swift suite holds Foundation and the Android lexical path to
++ * (Tests/AlignTests/LexicalNFCTests.swift), so java.text.Normalizer is held to
++ * the same expected bytes here.
++ */
++class AlignCodecTest {
++    private data class Vector(val name: String, val input: String, val nfc: String, val nfcUtf8: String)
++
++    private val vectors: List<Vector> by lazy {
++        val text = javaClass.classLoader!!.getResourceAsStream("lexical_nfc_vectors.json")!!
++            .bufferedReader().use { it.readText() }
++        Json.parseToJsonElement(text).jsonObject["vectors"]!!.jsonArray.map { e ->
++            val o = e.jsonObject
++            Vector(o["name"]!!.jsonPrimitive.content, o["input"]!!.jsonPrimitive.content,
++                o["nfc"]!!.jsonPrimitive.content, o["nfcUTF8"]!!.jsonPrimitive.content)
++        }
++    }
++
++    private fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it) }
++
++    @Test fun javaNormalizerMatchesTheSharedVectors() {
++        assertTrue(vectors.size > 20)
++        for (v in vectors) {
++            assertEquals(v.name, v.nfcUtf8, hex(AlignCodec.lexicalText(v.input).toByteArray(Charsets.UTF_8)))
++        }
++    }
++
++    /** Parse the input payload back the way Sources/Align/Binding.swift reads it. */
++    private fun decodeInput(bytes: ByteArray): Triple<FloatArray, Double, List<WordTiming>> {
++        val b = ByteBuffer.wrap(bytes)
++        val samples = FloatArray(b.int) { b.float }
++        val rate = b.double
++        val words = List(b.int) {
++            val text = ByteArray(b.int).also { b.get(it) }.toString(Charsets.UTF_8)
++            WordTiming(text, b.double, b.double)
++        }
++        assertEquals("trailing bytes in the input payload", 0, b.remaining())
++        return Triple(samples, rate, words)
++    }
++
++    @Test fun inputPayloadCarriesComposedTextAndTheTimes() {
++        val samples = floatArrayOf(0.25f, -0.5f, 1f)
++        val words = vectors.mapIndexed { i, v -> WordTiming(v.input, i.toDouble(), i + 0.5) }
++        val (s, rate, decoded) = decodeInput(AlignCodec.encodeInput(samples, 22_050.0, words))
++        assertTrue(samples.contentEquals(s))
++        assertEquals(22_050.0, rate, 0.0)
++        assertEquals(words.size, decoded.size)
++        for ((i, v) in vectors.withIndex()) {
++            assertEquals(v.name, v.nfcUtf8, hex(decoded[i].text.toByteArray(Charsets.UTF_8)))
++            assertEquals(i.toDouble(), decoded[i].start, 0.0)
++            assertEquals(i + 0.5, decoded[i].end, 0.0)
++        }
++    }
++
++    @Test fun decomposedAndComposedSpellingsEncodeIdentically() {
++        val nfd = listOf(WordTiming("café", 0.1, 0.4), WordTiming("canción", 0.5, 0.9))
++        val nfc = listOf(WordTiming("café", 0.1, 0.4), WordTiming("canción", 0.5, 0.9))
++        val audio = FloatArray(16) { it / 16f }
++        assertTrue(AlignCodec.encodeInput(audio, SAMPLE_RATE, nfd).contentEquals(AlignCodec.encodeInput(audio, SAMPLE_RATE, nfc)))
++        // NFC, not NFKC: a ligature reaches the model as itself.
++        assertNotEquals("fine", AlignCodec.lexicalText("ﬁne"))
++    }
++
++    @Test fun optionsPayloadIsTheLanguageString() {
++        val b = ByteBuffer.wrap(AlignCodec.encodeOptions("pt-BR"))
++        assertEquals(5, b.int)
++        assertEquals("pt-BR", ByteArray(5).also { b.get(it) }.toString(Charsets.UTF_8))
++        assertEquals(0, b.remaining())
++    }
++
++    @Test fun resultKeepsTheCallersTextAndReadsTimes() {
++        val words = listOf(WordTiming("café", 1.0, 2.0), WordTiming("x", 3.0, 4.0))
++        val payload = FfiWriter().int(2).double(1.1).double(1.9).int(1).double(3.0).double(4.0).int(0).done()
++        val out = AlignCodec.decodeResult(FfiReader(payload), words)
++        assertEquals(listOf(WordTiming("café", 1.1, 1.9, true), WordTiming("x", 3.0, 4.0, false)), out)
++        try {
++            AlignCodec.decodeResult(FfiReader(FfiWriter().int(1).double(0.0).double(0.0).int(0).done()), words)
++            fail("a word count mismatch must not decode")
++        } catch (e: AlignException) {
++            assertTrue(e.message!!.contains("1 words for 2"))
++        }
++    }
++
++    @Test fun validationNamesTheWord() {
++        val audio = FloatArray(4)
++        AlignCodec.validate(audio, SAMPLE_RATE, listOf(WordTiming("a", -1.0, 10_000_000.0)))
++        for ((rate, words) in listOf(
++            0.0 to emptyList(),
++            Double.NaN to emptyList(),
++            SAMPLE_RATE to listOf(WordTiming("a", 0.0, 1.0), WordTiming("b", Double.NaN, 1.0)),
++            SAMPLE_RATE to listOf(WordTiming("a", 0.0, 1e8)),
++        )) {
++            try {
++                AlignCodec.validate(audio, rate, words)
++                fail("accepted rate $rate words $words")
++            } catch (e: IllegalArgumentException) {
++                if (words.size == 2) assertTrue(e.message!!.startsWith("word 1 start"))
++            }
++        }
++        try {
++            AlignCodec.validate(FloatArray(0), SAMPLE_RATE, emptyList())
++            fail("accepted empty audio")
++        } catch (_: IllegalArgumentException) {
++        }
++    }
++
++    @Test fun languageKeyFollowsSwift() {
++        assertTrue(Align.isSupported("pt-BR"))
++        assertTrue(Align.isSupported("EN"))
++        assertTrue(!Align.isSupported("nl"))
++        assertEquals("zh", AlignCodec.languageKey("zh-Hant"))
++    }
++}
+-- 
+2.56.1
+

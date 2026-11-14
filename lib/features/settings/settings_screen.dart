@@ -1,0 +1,892 @@
+/// Settings, as drawn (Docket Settings redesign): five short groups, one line
+/// per setting with its value on the right, and the details one tap away: the
+/// transcript model and the reading voice in sheets, the model server and the
+/// credits on pages of their own.
+library;
+
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PlatformException;
+
+import '../../app/desert_ant.dart' show ModelStatus;
+import '../../app/services.dart';
+import '../../app/theme.dart';
+import '../../core/ai/model.dart';
+import '../../core/notes/read_aloud.dart' show readingVoiceRegions;
+import '../../core/voice/spoken.dart' show Engine;
+
+/// The app's version, as pubspec.yaml has it.
+const appVersion = '0.1.0';
+
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  late final Services _s = ServicesScope.of(context);
+
+  double get _speed => double.tryParse(_s.settings.get('speech.speed') ?? '') ?? 1.0;
+  String get _voice => (_s.settings.get('speech.voice') ?? '').isEmpty ? 'Default' : _s.settings.get('speech.voice')!;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Settings')),
+      body: ValueListenableBuilder<ModelStatus>(
+        valueListenable: _s.ant.status,
+        builder: (context, status, _) => ListenableBuilder(
+          listenable: _s.appearance,
+          builder: (context, _) => ListView(padding: const EdgeInsets.only(bottom: 24), children: [
+            _Group('Recording', [
+              _Switch('Live transcription', _s.autoEnabled('live'), (on) => setState(() => _s.setAutoEnabled('live', on))),
+              _Row('Transcript model', value: _s.transcriber == Engine.phonon ? 'Phonon' : 'Voz', onTap: _pickTranscriber),
+            ]),
+            _Group('Smart notes', [
+              _Switch('Title new notes', _s.autoEnabled('title'), (on) => setState(() => _s.setAutoEnabled('title', on))),
+              _Switch('Tag topics', _s.autoEnabled('tags'), (on) => setState(() => _s.setAutoEnabled('tags', on))),
+              _Switch('Emoji on tasks', _s.autoEnabled('emoji'), (on) => setState(() => _s.setAutoEnabled('emoji', on))),
+            ]),
+            if (status.speech)
+              _Group('Read aloud', [
+                _Row('Voice', value: '$_voice · ${_speedLabel(_speed)}', onTap: _pickVoice),
+              ]),
+            _Group('Appearance', [
+              _Line(label: 'Theme', child: _ThemeSwitch(appearance: _s.appearance)),
+              _Line(label: 'Accent', child: _AccentDots(appearance: _s.appearance)),
+            ]),
+            _Group('More', [
+              _Row(
+                'AI model server',
+                value: _s.modelUrl.isEmpty ? 'Off' : (Uri.tryParse(_s.modelUrl)?.host ?? 'On'),
+                onTap: () async {
+                  await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const _ServerScreen()));
+                  if (mounted) setState(() {});
+                },
+              ),
+              _Row('About & credits',
+                  onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const _AboutScreen()))),
+            ]),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(28, 12, 28, 0),
+              child: Text('Everything runs on this phone. Nothing is sent anywhere.',
+                  style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.45)),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickTranscriber() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (_) => _TranscriberSheet(services: _s),
+    );
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _pickVoice() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) => _VoiceSheet(services: _s),
+    );
+    unawaited(_s.ant.stopReading());
+    if (mounted) setState(() {});
+  }
+}
+
+String _speedLabel(double speed) => '${speed.toStringAsFixed(speed * 10 % 1 == 0 ? 1 : 2)}×';
+
+/// A group: its name in the accent, then a rounded card of rows, hairlines between them.
+class _Group extends StatelessWidget {
+  const _Group(this.label, this.children);
+
+  final String label;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(28, 18, 28, 8),
+        child: Text(label,
+            style: theme.textTheme.labelLarge?.copyWith(color: Accent.of(context), fontWeight: FontWeight.w500, letterSpacing: 0.4)),
+      ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Material(
+          color: theme.colorScheme.surfaceContainer,
+          borderRadius: BorderRadius.circular(20),
+          clipBehavior: Clip.antiAlias,
+          child: Column(children: [
+            for (final (i, child) in children.indexed) ...[
+              if (i > 0) Divider(height: 1, thickness: 1, color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5)),
+              child,
+            ],
+          ]),
+        ),
+      ),
+    ]);
+  }
+}
+
+/// A row that opens something: its name, its value, a chevron.
+class _Row extends StatelessWidget {
+  const _Row(this.label, {this.value, required this.onTap});
+
+  final String label;
+  final String? value;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    // One button of its own for screen readers ("Transcript model, Phonon"), not part of its group's text.
+    return MergeSemantics(
+      child: Semantics(
+        button: true,
+        container: true,
+        child: _content(theme, muted),
+      ),
+    );
+  }
+
+  Widget _content(ThemeData theme, Color muted) {
+    return InkWell(
+      onTap: onTap,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 56),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(children: [
+            Expanded(child: Text(label, style: theme.textTheme.bodyLarge)),
+            if (value != null) ...[
+              const SizedBox(width: 12),
+              // Against the chevron, as drawn; a long value is cut rather than squeezing the name.
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 180),
+                child: Text(value!, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodyMedium?.copyWith(color: muted)),
+              ),
+            ],
+            const SizedBox(width: 6),
+            Icon(Icons.chevron_right_rounded, color: muted.withValues(alpha: 0.7)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// A row that turns something on or off; the whole row toggles.
+class _Switch extends StatelessWidget {
+  const _Switch(this.label, this.value, this.onChanged);
+
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) => MergeSemantics(
+        child: InkWell(
+          onTap: () => onChanged(!value),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 56),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(children: [
+                Expanded(child: Text(label, style: Theme.of(context).textTheme.bodyLarge)),
+                Switch(value: value, onChanged: onChanged),
+              ]),
+            ),
+          ),
+        ),
+      );
+}
+
+/// A row with a control of its own on the right.
+class _Line extends StatelessWidget {
+  const _Line({required this.label, required this.child});
+
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 56),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(children: [
+            Text(label, style: Theme.of(context).textTheme.bodyLarge),
+            const SizedBox(width: 14),
+            Expanded(child: Align(alignment: Alignment.centerRight, child: child)),
+          ]),
+        ),
+      );
+}
+
+/// Auto · Light · Dark · Black, as one pill.
+class _ThemeSwitch extends StatelessWidget {
+  const _ThemeSwitch({required this.appearance});
+
+  final Appearance appearance;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final accent = Accent.of(context);
+    const names = {ThemeChoice.system: 'Auto', ThemeChoice.light: 'Light', ThemeChoice.dark: 'Dark', ThemeChoice.amoled: 'Black'};
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(color: theme.colorScheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(20)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          for (final MapEntry(key: choice, value: name) in names.entries)
+            Semantics(
+              selected: appearance.choice == choice,
+              button: true,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(17),
+                onTap: () => appearance.choice = choice,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  constraints: const BoxConstraints(minHeight: 34),
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 11),
+                  decoration: BoxDecoration(
+                    color: appearance.choice == choice ? accent : Colors.transparent,
+                    borderRadius: BorderRadius.circular(17),
+                  ),
+                  child: Text(
+                    name,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: appearance.choice == choice ? Accent.onOf(context) : theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// The accent colours as dots, the chosen one ringed; all of them fit the line.
+class _AccentDots extends StatelessWidget {
+  const _AccentDots({required this.appearance});
+
+  final Appearance appearance;
+
+  @override
+  Widget build(BuildContext context) {
+    final ring = Theme.of(context).colorScheme.onSurface;
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        for (final (i, MapEntry(key: name, value: color)) in accents.entries.indexed) ...[
+          if (i > 0) const SizedBox(width: 8),
+          Tooltip(
+            message: name,
+            child: Semantics(
+              label: name,
+              selected: appearance.accent == name,
+              button: true,
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: () => appearance.accent = name,
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                    border: appearance.accent == name ? Border.all(color: ring, width: 2.5) : null,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
+/// Voz or Phonon for the saved transcript; one line each.
+class _TranscriberSheet extends StatefulWidget {
+  const _TranscriberSheet({required this.services});
+
+  final Services services;
+
+  @override
+  State<_TranscriberSheet> createState() => _TranscriberSheetState();
+}
+
+class _TranscriberSheetState extends State<_TranscriberSheet> {
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final s = widget.services;
+    final phonon = s.ant.status.value.phonon;
+    Widget option(Engine engine, String name, String line, {bool enabled = true}) {
+      final on = s.transcriber == engine;
+      final accent = Accent.of(context);
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Material(
+          color: on ? accent.withValues(alpha: 0.10) : Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: on ? accent : theme.colorScheme.outlineVariant),
+          ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: enabled
+                ? () {
+                    setState(() => s.transcriber = engine);
+                    Navigator.pop(context);
+                  }
+                : null,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Icon(on ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded, color: on ? accent : muted),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(name, style: theme.textTheme.titleMedium?.copyWith(color: enabled ? null : muted)),
+                    const SizedBox(height: 4),
+                    Text(line, style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.4)),
+                  ]),
+                ),
+              ]),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Transcript model', style: theme.textTheme.titleLarge),
+          const SizedBox(height: 4),
+          Text('Writes a recording\'s transcript after you save it.',
+              style: theme.textTheme.bodyMedium?.copyWith(color: muted)),
+          const SizedBox(height: 14),
+          if (s.ant.status.value.has('voz'))
+            option(Engine.voz, 'Voz', 'Desert Ant\'s model. Steady and thorough.')
+          else
+            _ImportVoz(services: s, onDone: () => setState(() => s.transcriber = Engine.voz)),
+          option(Engine.phonon, 'Phonon',
+              phonon ? 'About 4× faster on this phone. Same 25 languages.' : 'Not on this phone.', enabled: phonon),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(2, 4, 2, 0),
+            child: Text(
+              'Other languages always go to the phone\'s own offline recognizer.${phonon ? ' Live words use Phonon.' : ''}',
+              style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.45),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Voz is not in the APK (it would take it over GitHub's release limit): its card offers to import it, from
+/// the release's Voz pack (.zip) or its six files, each checked before it is kept.
+class _ImportVoz extends StatefulWidget {
+  const _ImportVoz({required this.services, required this.onDone});
+
+  final Services services;
+  final VoidCallback onDone;
+
+  @override
+  State<_ImportVoz> createState() => _ImportVozState();
+}
+
+class _ImportVozState extends State<_ImportVoz> {
+  String _problem = '';
+
+  Future<void> _import() async {
+    final ant = widget.services.ant;
+    setState(() => _problem = '');
+    final uris = await ant.pickFiles();
+    if (uris == null || uris.isEmpty || !mounted) return;
+    try {
+      await ant.importModel('voz', uris);
+      widget.onDone();
+    } on PlatformException catch (e) {
+      if (mounted) setState(() => _problem = e.message ?? 'Voz could not be imported.');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final importable = widget.services.ant.status.value.importable.contains('voz');
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        child: ValueListenableBuilder<double?>(
+          valueListenable: widget.services.ant.importing,
+          builder: (context, progress, _) => Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(Icons.radio_button_off_rounded, color: muted.withValues(alpha: 0.5)),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Voz', style: theme.textTheme.titleMedium?.copyWith(color: muted)),
+                const SizedBox(height: 4),
+                Text(
+                  progress != null
+                      ? 'Importing Voz… ${(progress * 100).round()}%'
+                      : 'Not on this phone. Import the Voz pack (.zip) from Docket\'s release, or its six files.',
+                  style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.4),
+                ),
+                if (progress != null) ...[
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(value: progress, minHeight: 3),
+                ] else if (importable)
+                  TextButton(
+                    style: TextButton.styleFrom(padding: EdgeInsets.zero, foregroundColor: Accent.of(context)),
+                    onPressed: _import,
+                    child: const Text('Import Voz…'),
+                  ),
+                if (_problem.isNotEmpty)
+                  Text(_problem, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error, height: 1.4)),
+              ]),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// The reading voice, grouped by where it is from, each to be heard first; and the speed.
+class _VoiceSheet extends StatefulWidget {
+  const _VoiceSheet({required this.services});
+
+  final Services services;
+
+  @override
+  State<_VoiceSheet> createState() => _VoiceSheetState();
+}
+
+class _VoiceSheetState extends State<_VoiceSheet> {
+  late Future<(List<String>, List<String>)> _voices = _load();
+  String? _hearing;
+  String _problem = '';
+  bool _adding = false;
+
+  /// All the voices, and which of them are the user's own.
+  Future<(List<String>, List<String>)> _load() async =>
+      (await widget.services.ant.voices(), await widget.services.ant.customVoices());
+
+  String get _chosen => widget.services.settings.get('speech.voice') ?? '';
+  double get _speed => double.tryParse(widget.services.settings.get('speech.speed') ?? '') ?? 1.0;
+
+  Future<void> _hear(String voice) async {
+    setState(() => _hearing = voice);
+    final ant = widget.services.ant;
+    await ant.readAloud(['Hello, I\'m $voice. This is how I read your notes.'], voice: voice, speed: _speed);
+    void done() {
+      if (ant.reading.value == null) {
+        ant.reading.removeListener(done);
+        if (mounted && _hearing == voice) setState(() => _hearing = null);
+      }
+    }
+
+    ant.reading.addListener(done);
+  }
+
+  /// A name for a voice: typed, starting from [initial].
+  Future<String?> _askName(String title, String initial) {
+    final controller = TextEditingController(text: initial);
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(labelText: 'Name'),
+          onSubmitted: (v) => Navigator.pop(context, v),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('Save')),
+        ],
+      ),
+    );
+  }
+
+  /// + : pick a Phonon voice file, name it, and keep it only if it is a valid voice.
+  Future<void> _add() async {
+    final ant = widget.services.ant;
+    setState(() => _problem = '');
+    final picked = await ant.pickFile();
+    if (picked == null || !mounted) return;
+    final base = picked.name.replaceFirst(RegExp(r'\.safetensors$', caseSensitive: false), '');
+    final name = await _askName('Name this voice', base);
+    if (name == null || name.trim().isEmpty || !mounted) return;
+    setState(() => _adding = true);
+    try {
+      final kept = await ant.addVoice(picked.path, name);
+      widget.services.settings.set('speech.voice', kept);
+      if (mounted) setState(() => _voices = _load());
+    } on PlatformException catch (e) {
+      if (mounted) setState(() => _problem = e.message ?? 'This file could not be added.');
+    } finally {
+      if (mounted) setState(() => _adding = false);
+    }
+  }
+
+  Future<void> _rename(String voice) async {
+    final name = await _askName('Rename voice', voice);
+    if (name == null || name.trim().isEmpty || !mounted) return;
+    try {
+      final kept = await widget.services.ant.renameVoice(voice, name);
+      if (_chosen == voice) widget.services.settings.set('speech.voice', kept);
+      setState(() => _voices = _load());
+    } on PlatformException catch (e) {
+      setState(() => _problem = e.message ?? 'The voice could not be renamed.');
+    }
+  }
+
+  Future<void> _remove(String voice) async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Remove $voice?'),
+        content: const Text('Its voice file is deleted from this phone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (sure != true || !mounted) return;
+    await widget.services.ant.removeVoice(voice);
+    if (_chosen == voice) widget.services.settings.set('speech.voice', '');
+    setState(() => _voices = _load());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final accent = Accent.of(context);
+    final settings = widget.services.settings;
+
+    Widget header(String text, {Widget? action}) => Padding(
+          padding: EdgeInsets.fromLTRB(4, action == null ? 12 : 4, 0, action == null ? 4 : 0),
+          child: Row(children: [
+            Expanded(child: Text(text, style: theme.textTheme.labelMedium?.copyWith(color: muted, letterSpacing: 0.4))),
+            ?action,
+          ]),
+        );
+
+    Widget voiceRow(String v, {bool custom = false}) => Material(
+          color: _chosen == v ? accent.withValues(alpha: 0.12) : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () => setState(() => settings.set('speech.voice', v)),
+            child: SizedBox(
+              height: 52,
+              child: Row(children: [
+                const SizedBox(width: 12),
+                Icon(_chosen == v ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
+                    color: _chosen == v ? accent : muted),
+                const SizedBox(width: 12),
+                Expanded(child: Text(v, style: theme.textTheme.bodyLarge, overflow: TextOverflow.ellipsis)),
+                IconButton(
+                  tooltip: 'Hear $v',
+                  onPressed: () => _hear(v),
+                  icon: _hearing == v
+                      ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.play_arrow_rounded),
+                ),
+                if (custom)
+                  PopupMenuButton<String>(
+                    tooltip: 'More for $v',
+                    icon: const Icon(Icons.more_vert_rounded),
+                    onSelected: (choice) => choice == 'rename' ? _rename(v) : _remove(v),
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'rename', child: Text('Rename')),
+                      PopupMenuItem(value: 'remove', child: Text('Remove')),
+                    ],
+                  ),
+              ]),
+            ),
+          ),
+        );
+
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.75,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text('Reading voice', style: theme.textTheme.titleLarge),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 2, 4, 6),
+              child: Text('Tap play to hear a voice. English only.', style: theme.textTheme.bodyMedium?.copyWith(color: muted)),
+            ),
+            if (_problem.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+                child: Text(_problem, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error, height: 1.4)),
+              ),
+            Expanded(
+              child: FutureBuilder<(List<String>, List<String>)>(
+                future: _voices,
+                builder: (context, snap) {
+                  final (all, custom) = snap.data ?? (const <String>[], const <String>[]);
+                  final mine = custom.toSet();
+                  final groups = <String, List<String>>{};
+                  for (final v in all) {
+                    if (mine.contains(v)) continue;
+                    groups.putIfAbsent(readingVoiceRegions[v] ?? 'Other', () => []).add(v);
+                  }
+                  final order = ['UK', 'US', 'Other'].where(groups.containsKey);
+                  return ListView(children: [
+                    header(
+                      'Custom voices',
+                      action: _adding
+                          ? const Padding(
+                              padding: EdgeInsets.all(14),
+                              child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                            )
+                          : IconButton(tooltip: 'Add a voice', onPressed: _add, icon: const Icon(Icons.add_rounded)),
+                    ),
+                    if (custom.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+                        child: Text('Add a Phonon voice file you made (.safetensors).',
+                            style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+                      ),
+                    for (final v in custom) voiceRow(v, custom: true),
+                    for (final region in order) ...[
+                      header(region),
+                      for (final v in groups[region]!) voiceRow(v),
+                    ],
+                  ]);
+                },
+              ),
+            ),
+            Divider(color: theme.colorScheme.outlineVariant),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
+              child: Row(children: [
+                Text('Speed', style: theme.textTheme.bodyLarge),
+                const Spacer(),
+                Text(_speedLabel(_speed), style: theme.textTheme.bodyMedium?.copyWith(color: muted)),
+              ]),
+            ),
+            Slider(
+              min: 0.75,
+              max: 1.5,
+              divisions: 6,
+              value: _speed.clamp(0.75, 1.5),
+              label: _speedLabel(_speed),
+              onChanged: (v) => setState(() => settings.set('speech.speed', v.toStringAsFixed(3))),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// The model server for Summarise, Tidy up and recording summaries: optional, used only when asked.
+class _ServerScreen extends StatefulWidget {
+  const _ServerScreen();
+
+  @override
+  State<_ServerScreen> createState() => _ServerScreenState();
+}
+
+class _ServerScreenState extends State<_ServerScreen> {
+  late final Services _s = ServicesScope.of(context);
+  late final _url = TextEditingController(text: _s.modelUrl);
+  late final _model = TextEditingController(text: _s.modelName);
+  late final _key = TextEditingController(text: _s.modelKey);
+  String _check = '';
+  bool _checking = false;
+
+  @override
+  void dispose() {
+    _url.dispose();
+    _model.dispose();
+    _key.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() => _s.setModel(url: _url.text, model: _model.text, key: _key.text);
+
+  Future<void> _checkModel() async {
+    await _save();
+    final server = _s.model;
+    if (server == null) {
+      setState(() => _check = 'Add the server address first.');
+      return;
+    }
+    setState(() {
+      _checking = true;
+      _check = '';
+    });
+    String result;
+    try {
+      final reply = await server.chat('Reply with the single word OK.', 'Are you there?', maxTokens: 16);
+      result = reply.isEmpty ? 'The server answered, but with nothing.' : 'Works: ${server.label} replied "$reply".';
+    } on ModelFailed catch (error) {
+      result = error.reason;
+    }
+    if (mounted) {
+      setState(() {
+        _checking = false;
+        _check = result;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    Widget field(TextEditingController c, String label, String hint, {bool secret = false}) => Padding(
+          padding: const EdgeInsets.only(bottom: 18),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Padding(
+              padding: const EdgeInsets.only(left: 4, bottom: 6),
+              child: Text(label, style: theme.textTheme.labelLarge?.copyWith(color: muted)),
+            ),
+            TextField(
+              controller: c,
+              obscureText: secret,
+              autocorrect: false,
+              keyboardType: secret ? TextInputType.visiblePassword : TextInputType.url,
+              decoration: InputDecoration(
+                hintText: hint,
+                filled: true,
+                fillColor: theme.colorScheme.surfaceContainer,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ]),
+        );
+    return PopScope(
+      onPopInvokedWithResult: (_, _) => _save(),
+      child: Scaffold(
+        appBar: AppBar(title: const Text('AI model server')),
+        body: ListView(padding: const EdgeInsets.fromLTRB(20, 4, 20, 24), children: [
+          Text(
+            'Optional. Used only for Summarise, Tidy up and recording summaries, and only when you ask. Any server '
+            'with the OpenAI-compatible API: llama-server or Ollama on this phone or your computer.',
+            style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.5),
+          ),
+          const SizedBox(height: 18),
+          field(_url, 'Address', 'http://127.0.0.1:8080/v1'),
+          field(_model, 'Model', 'The server\'s own'),
+          field(_key, 'API key', 'None needed', secret: true),
+          Row(children: [
+            FilledButton(onPressed: _checking ? null : _checkModel, child: const Text('Check')),
+            const SizedBox(width: 14),
+            if (_checking) const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+            Expanded(
+              child: Text(
+                _check.isNotEmpty ? _check : (_s.modelUrl.isEmpty ? 'Not set: AI actions are off.' : ''),
+                style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.4),
+              ),
+            ),
+          ]),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Docket, its version, and the credits the on-device models' licences ask for.
+class _AboutScreen extends StatelessWidget {
+  const _AboutScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final ant = ServicesScope.of(context).ant;
+    Widget credit(String name, String line, String url) => InkWell(
+          onTap: () => ant.openLink(url),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 64),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(children: [
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                    Text(name, style: theme.textTheme.bodyLarge),
+                    const SizedBox(height: 3),
+                    Text(line, style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.35)),
+                  ]),
+                ),
+                Icon(Icons.open_in_new_rounded, size: 18, color: muted.withValues(alpha: 0.8)),
+              ]),
+            ),
+          ),
+        );
+    return Scaffold(
+      appBar: AppBar(title: const Text('About & credits')),
+      body: ListView(children: [
+        const SizedBox(height: 18),
+        Center(
+          child: Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+            alignment: Alignment.center,
+            child: const Icon(Icons.edit_outlined, size: 38, color: Colors.black, semanticLabel: 'Docket icon'),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Center(child: Text('Docket', style: theme.textTheme.titleLarge)),
+        const SizedBox(height: 4),
+        Center(
+          child: Text('Version $appVersion · notes and voice, on this phone',
+              style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+        ),
+        _Group('On-device AI', [
+          credit('Desert Ant Labs', 'Clear, Ear, Voz, Who, Align, Title, Gist, Emo', 'https://desertant.com'),
+          credit('Fermion Research · Phonon-2.5', 'CC BY 4.0, from NVIDIA Parakeet-TDT',
+              'https://huggingface.co/FermionResearch/Phonon-2.5'),
+          credit('Gradium · Phonon voice', 'Apache-2.0', 'https://huggingface.co/gradium/phonon-31m-en'),
+        ]),
+      ]),
+    );
+  }
+}

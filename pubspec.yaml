@@ -1,0 +1,27 @@
+name: notes_app
+description: "Notes: plain Markdown files with Obsidian's conventions, voice notes cleaned, transcribed, titled and tagged on the phone by Desert Ant's models, fully offline."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  gpt_markdown: ^1.4.0
+  http: ^1.6.0
+  path_provider: ^2.1.6
+  flutter_secure_storage: ^11.2.0
+  saf_util: ^3.1.1
+  saf_stream: ^4.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
