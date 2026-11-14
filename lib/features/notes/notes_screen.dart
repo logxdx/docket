@@ -178,7 +178,8 @@ class _NotesScreenState extends State<NotesScreen> {
         title: Text('Move ${_countLabel()} to the trash?'),
         content: Text([
           if (inside > 0) 'The folders hold $inside note${inside == 1 ? '' : 's'}, which go too.',
-          'They go to the vault\'s .trash folder, as in Obsidian: restore them from Trash in the menu.',
+          '${_selected.length == 1 ? 'It goes' : 'They go'} to the vault\'s .trash folder, as in Obsidian: restore '
+              '${_selected.length == 1 ? 'it' : 'them'} from Trash in the menu.',
         ].join(' ')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),

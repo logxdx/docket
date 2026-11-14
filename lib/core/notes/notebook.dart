@@ -303,7 +303,8 @@ class Notebook extends ChangeNotifier {
 
   /// Move [note] to the trash.
   Future<void> trash(Note note) async {
-    await vault.move(note.file, await _freeInTrash('${note.title}.md'));
+    // Under its own path, so it can go back where it was.
+    await vault.move(note.file, await _freeInTrash(note.path));
     _notes.remove(note.path);
     _saveCache();
     notifyListeners();
@@ -311,7 +312,7 @@ class Notebook extends ChangeNotifier {
 
   /// Move the folder [path], with its notes, to the trash.
   Future<void> trashFolder(String path) async {
-    final to = (await _freeInTrash(path.split('/').last)).replaceFirst(RegExp(r'\.md$'), '');
+    final to = await _freeInTrash(path);
     await moveFolder(path, to);
   }
 
@@ -319,15 +320,17 @@ class Notebook extends ChangeNotifier {
   Future<List<VaultFile>> trashed() async =>
       (await vault.listIn(trashDir))..sort((a, b) => b.mtime.compareTo(a.mtime));
 
-  /// Put a note from the trash back, at the top of the vault (renamed when the name is taken).
+  /// Put a note from the trash back in the folder it was in (renamed when the name is taken there).
   Future<Note> restore(VaultFile file) async {
     final text = await vault.read(file);
-    final base = file.path.split('/').last.replaceFirst(RegExp(r'\.md$'), '');
+    final was = file.path.substring(trashDir.length + 1);
+    final folder = parentOf(was);
+    final base = _noExt(was.split('/').last);
     var name = base;
-    for (var n = 2; _notes.containsKey('$name.md'); n++) {
+    for (var n = 2; _notes.containsKey(_join(folder, '$name.md')); n++) {
       name = '$base $n';
     }
-    final moved = await vault.move(file, '$name.md');
+    final moved = await vault.move(file, _join(folder, '$name.md'));
     final note = Note(file: moved, text: text);
     _notes[moved.path] = note;
     _saveCache();
@@ -341,12 +344,12 @@ class Notebook extends ChangeNotifier {
   /// Delete everything in the trash.
   Future<void> emptyTrash() => vault.deleteFolder(trashDir);
 
-  /// A name in the trash not taken yet: "Note.md", "Note 2.md"...
-  Future<String> _freeInTrash(String name) async {
+  /// [path] in the trash, or "path 2"... when that is taken: ".trash/Work/Plan.md", ".trash/Work/Plan 2.md".
+  Future<String> _freeInTrash(String path) async {
     final taken = {for (final f in await vault.listIn(trashDir)) f.path.toLowerCase()};
-    final dot = name.endsWith('.md') ? name.length - 3 : name.length;
-    final base = name.substring(0, dot), ext = name.substring(dot);
-    var candidate = '$trashDir/$name';
+    final dot = path.endsWith('.md') ? path.length - 3 : path.length;
+    final base = path.substring(0, dot), ext = path.substring(dot);
+    var candidate = '$trashDir/$path';
     for (var n = 2; taken.contains(candidate.toLowerCase()) || taken.any((t) => t.startsWith('${candidate.toLowerCase()}/')); n++) {
       candidate = '$trashDir/$base $n$ext';
     }

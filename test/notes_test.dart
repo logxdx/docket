@@ -179,7 +179,7 @@ void main() {
       await book.trash(a);
       await book.trash(book.byPath('Work/Plan.md')!);
       expect(book.byPath('Plan.md'), isNull);
-      expect((await book.trashed()).map((f) => f.path).toSet(), {'.trash/Plan.md', '.trash/Plan 2.md'});
+      expect((await book.trashed()).map((f) => f.path).toSet(), {'.trash/Plan.md', '.trash/Work/Plan.md'});
       // The trash is not in the notes, the folders or the search.
       expect(book.notes, isEmpty);
       expect(book.folders, ['Work']);
@@ -192,6 +192,14 @@ void main() {
       final back = await book.restore((await book.trashed()).firstWhere((f) => f.path == '.trash/Plan.md'));
       expect(back.path, 'Plan.md');
       expect(back.text, 'a');
+      // Back in its own folder; a name taken there by then gets a number.
+      await book.create('Plan', folder: 'Work', text: 'new');
+      final work = await book.restore((await book.trashed()).firstWhere((f) => f.path == '.trash/Work/Plan.md'));
+      expect(work.path, 'Work/Plan 2.md');
+      // Trashing the same name twice keeps both.
+      await book.trash(back);
+      await book.trash(await book.create('Plan', text: 'again'));
+      expect((await book.trashed()).map((f) => f.path).toSet(), containsAll({'.trash/Plan.md', '.trash/Plan 2.md'}));
       await book.emptyTrash();
       expect(await book.trashed(), isEmpty);
     });

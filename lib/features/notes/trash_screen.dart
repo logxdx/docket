@@ -39,7 +39,7 @@ class _TrashScreenState extends State<TrashScreen> {
   Future<void> _restore(VaultFile file) async {
     final note = await _book.restore(file);
     _reload();
-    _say('"${note.title}" is back in the top folder');
+    _say('"${note.title}" is back in ${note.folder.isEmpty ? 'the top folder' : note.folder}');
   }
 
   Future<void> _delete(VaultFile file) async {
