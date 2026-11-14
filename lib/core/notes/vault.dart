@@ -5,6 +5,7 @@
 library;
 
 import 'dart:io';
+import 'dart:typed_data';
 
 /// A Markdown file in a vault.
 class VaultFile {
@@ -64,6 +65,9 @@ abstract class Vault {
 
   /// The notes in [folder] (a dot-folder such as .trash, which [list] skips), recursively.
   Future<List<VaultFile>> listIn(String folder);
+
+  /// The bytes of the file at [path] (an image), or null when it is not there.
+  Future<Uint8List?> readBytes(String path);
 }
 
 class LocalVault implements Vault {
@@ -196,6 +200,12 @@ class LocalVault implements Vault {
   }
 
   @override
+  Future<Uint8List?> readBytes(String path) async {
+    final file = _file(path);
+    return file.existsSync() ? file.readAsBytes() : null;
+  }
+
+  @override
   Future<List<VaultFile>> listIn(String folder) async {
     final dir = Directory('${root.path}/$folder');
     if (!dir.existsSync()) return [];
@@ -260,6 +270,9 @@ class ReadOnlyVault implements Vault {
 
   @override
   Future<List<VaultFile>> listIn(String folder) => inner.listIn(folder);
+
+  @override
+  Future<Uint8List?> readBytes(String path) => inner.readBytes(path);
 }
 
 class ReadOnlyNotes implements Exception {

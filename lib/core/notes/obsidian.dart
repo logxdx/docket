@@ -154,7 +154,7 @@ String? blockOf(String text, String id) {
     // A list item is its own block; a paragraph runs back to the blank line before it.
     if (RegExp(r'^\s*(?:[-*+]|\d+[.)])\s').hasMatch(lines[i])) return lines[i].replaceFirst(mark, '');
     var start = i;
-    while (start > 0 && lines[start - 1].trim().isNotEmpty) {
+    while (start > 0 && lines[start - 1].trim().isNotEmpty && !RegExp(r'^#{1,6}\s').hasMatch(lines[start - 1])) {
       start--;
     }
     return [...lines.sublist(start, i), lines[i].replaceFirst(mark, '')].join('\n');

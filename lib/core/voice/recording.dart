@@ -5,6 +5,8 @@
 /// marker holds its place) and the raw transcript, word for word.
 library;
 
+import '../notes/obsidian.dart';
+
 String _two(int n) => n.toString().padLeft(2, '0');
 
 /// "3 min 12 s", "45 s".
@@ -176,6 +178,31 @@ class SpokenPart extends NotePart {
   final String? audio;
 }
 
+/// An Obsidian callout ("> [!warning] Title" and its quoted lines): a coloured box, folding when [fold] is
+/// '+' (open) or '-' (closed).
+class CalloutPart extends NotePart {
+  const CalloutPart({required this.type, required this.title, required this.fold, required this.body});
+  final String type;
+  final String title;
+  final String fold;
+  final String body;
+}
+
+/// Another note shown in this one (![[Note]], ![[Note#Heading]], ![[Note^block]]).
+class EmbedPart extends NotePart {
+  const EmbedPart(this.target, {this.heading, this.block});
+  final String target;
+  final String? heading;
+  final String? block;
+}
+
+/// An image file shown in the note (![[photo.png|300]]); [size] its width, or "width x height".
+class ImagePart extends NotePart {
+  const ImagePart(this.name, {this.size});
+  final String name;
+  final String? size;
+}
+
 /// A raw transcript, folded until opened.
 class TranscriptPart extends NotePart {
   const TranscriptPart(this.text);
@@ -197,8 +224,15 @@ List<NotePart> noteParts(String text) {
 
   final lines = text.split('\n');
   String? audio;
+  var inCode = false;
   for (var i = 0; i < lines.length; i++) {
     final line = lines[i];
+    // Inside a code block everything is code: no callouts, embeds or cards.
+    if (line.trimLeft().startsWith('```')) inCode = !inCode;
+    if (inCode || line.trimLeft().startsWith('```')) {
+      markdown.add(line);
+      continue;
+    }
     if (_audio.firstMatch(line) case final m?) {
       flush();
       parts.add(AudioPart(m[1]!));
@@ -221,6 +255,13 @@ List<NotePart> noteParts(String text) {
     } else if (_marker.firstMatch(line) case final m?) {
       flush();
       parts.add(SummaryPart(m[1]!));
+    } else if (calloutAt(lines, i) case (final c, final next)?) {
+      flush();
+      parts.add(CalloutPart(type: c.type, title: c.title, fold: c.fold, body: c.body));
+      i = next - 1;
+    } else if (embedOf(line) case final e? when !isAudio(e.target)) {
+      flush();
+      parts.add(isImage(e.target) ? ImagePart(e.target, size: e.size) : EmbedPart(e.target, heading: e.heading, block: e.block));
     } else if (_raw.firstMatch(line) case final m?) {
       flush();
       final body = <String>[];

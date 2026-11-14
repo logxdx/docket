@@ -7,7 +7,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:gpt_markdown/gpt_markdown.dart';
 
 import '../../app/safe_image.dart';
 import '../../app/services.dart';
@@ -28,12 +27,12 @@ import '../../core/voice/summaries.dart';
 import '../settings/settings_screen.dart';
 import '../settings/settings_tiles.dart';
 import 'audio_player.dart';
+import 'markdown_view.dart';
 import 'notes_screen.dart' show pickFolder;
 import 'read_aloud_sheet.dart';
 import 'record_screen.dart';
 import 'spoken_view.dart';
 
-const _noteScheme = 'notes-link:';
 const taskScheme = 'notes-task:';
 
 class NoteScreen extends StatefulWidget {
@@ -486,11 +485,17 @@ class _NoteScreenState extends State<NoteScreen> {
     }
   }
 
-  /// [[Title|alias]] -> [alias](notes-link:Title), for the preview.
-  static String _linked(String text) => text.replaceAllMapped(
-        RegExp(r'\[\[([^\[\]|#\n]+)(#[^\[\]|\n]*)?(?:\|([^\[\]\n]*))?\]\]'),
-        (m) => '[${m[3] ?? m[1]}]($_noteScheme${Uri.encodeComponent(m[1]!.trim())})',
-      );
+  /// A link tapped in the reading view: a note (to a heading or block in it too), a task's box, or the web.
+  void _onLink(String url) {
+    if (url.startsWith(noteScheme)) {
+      final target = Uri.decodeComponent(url.substring(noteScheme.length));
+      _follow(target.split(RegExp(r'[#^]')).first.trim());
+    } else if (url.startsWith(taskScheme)) {
+      _tick(int.parse(url.substring(taskScheme.length)));
+    } else if (Uri.tryParse(url) case final uri? when safeLink(uri)) {
+      ServicesScope.of(context).ant.openLink(url);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -618,17 +623,17 @@ class _NoteScreenState extends State<NoteScreen> {
               // Task links are numbered over the whole note, before it is cut into parts.
               for (final part in noteParts(withoutProperties(taskLinks(_text.text, taskScheme))))
                 switch (part) {
-                  MarkdownPart(:final text) => SelectionArea(
-                      child: GptMarkdown(
-                        _linked(text),
-                        style: theme.textTheme.bodyLarge,
-                        imageBuilder: safeMarkdownImage,
-                        onLinkTap: (url, _) {
-                          if (url.startsWith(_noteScheme)) _follow(Uri.decodeComponent(url.substring(_noteScheme.length)));
-                          if (url.startsWith(taskScheme)) _tick(int.parse(url.substring(taskScheme.length)));
-                        },
-                      ),
+                  MarkdownPart(:final text) => SelectionArea(child: NoteMarkdown(text, onLink: _onLink)),
+                  CalloutPart() => CalloutBox(
+                      type: part.type,
+                      title: part.title,
+                      fold: part.fold,
+                      body: part.body,
+                      onLink: _onLink,
                     ),
+                  EmbedPart(:final target) =>
+                    EmbedBox(book: book, target: target, heading: part.heading, block: part.block, onLink: _onLink),
+                  ImagePart(:final name) => VaultImage(book: book, name: name, folder: note?.folder ?? '', size: part.size),
                   AudioPart(:final name) => RecordingAudio(
                       key: ValueKey('audio:$name'),
                       playback: _playback(name, note?.folder),

@@ -158,6 +158,12 @@ class SafVault implements Vault {
   }
 
   @override
+  Future<Uint8List?> readBytes(String path) async {
+    final file = await _util.child(treeUri, path.split('/'));
+    return file == null || file.isDir ? null : _stream.readFileBytes(file.uri);
+  }
+
+  @override
   Future<List<VaultFile>> listIn(String folder) async {
     final out = <VaultFile>[];
     Future<void> walk(String dir, String prefix, int depth) async {
