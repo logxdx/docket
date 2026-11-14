@@ -59,6 +59,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _Group('Read aloud', [
                 _Row('Voice', value: '$_voice · ${_speedLabel(_speed)}', onTap: _pickVoice),
               ]),
+            _Group('Notes', [
+              _Row('Daily notes',
+                  value: _s.notebook.dailyFolder.isEmpty ? _s.notebook.dailyFormat : '${_s.notebook.dailyFolder}/${_s.notebook.dailyFormat}',
+                  onTap: _dailySettings),
+              _Row('Templates folder', value: _s.notebook.templatesFolder, onTap: () => _ask('notes.templates', 'Templates folder',
+                  _s.notebook.templatesFolder, 'Notes in this folder are templates ({{title}}, {{date}}, {{date:FORMAT}}, {{time}}).')),
+              _Row('Pictures go in', value: _s.attachmentsFolder.isEmpty ? 'The note\'s folder' : _s.attachmentsFolder,
+                  onTap: () => _ask('notes.attachments', 'Pictures go in', _s.attachmentsFolder,
+                      'A folder for pictures added to notes; empty: next to the note.')),
+            ]),
             _Group('Appearance', [
               _Line(label: 'Theme', child: _ThemeSwitch(appearance: _s.appearance)),
               _Line(label: 'Accent', child: _AccentDots(appearance: _s.appearance)),
@@ -87,6 +97,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
     );
+  }
+
+  /// One notes setting, as text.
+  Future<void> _ask(String key, String title, String value, String help) async {
+    final c = TextEditingController(text: value);
+    final out = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          TextField(controller: c, autofocus: true),
+          const SizedBox(height: 10),
+          Text(help, style: Theme.of(context).textTheme.bodySmall),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, c.text), child: const Text('Save')),
+        ],
+      ),
+    );
+    c.dispose();
+    if (out == null) return;
+    _s.setNotesSetting(key, out);
+    if (mounted) setState(() {});
+  }
+
+  /// Daily notes as Obsidian's plugin sets them: folder, name format (Moment), template.
+  Future<void> _dailySettings() async {
+    await _ask('daily.folder', 'Daily notes folder', _s.notebook.dailyFolder, 'Where daily notes go; empty: the top folder.');
+    if (!mounted) return;
+    await _ask('daily.format', 'Daily note name', _s.notebook.dailyFormat,
+        'A date format, as in Obsidian: YYYY-MM-DD, dddd D MMMM YYYY, YYYY/MM/YYYY-MM-DD (folders by month)…');
+    if (!mounted) return;
+    await _ask('daily.template', 'Daily note template', _s.notebook.dailyTemplate,
+        'A template\'s name or path, such as Templates/Daily; empty: the template called "Daily", if there is one.');
   }
 
   Future<void> _pickTranscriber() async {

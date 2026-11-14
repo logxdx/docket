@@ -13,6 +13,7 @@ import 'package:saf_util/saf_util.dart';
 import '../core/ai/model.dart';
 import '../core/ai/prompts.dart';
 import '../core/notes/notebook.dart';
+import '../core/notes/recovery.dart';
 import '../core/notes/vault.dart';
 import '../core/voice/spoken.dart' show Engine;
 import '../core/voice/summaries.dart';
@@ -52,7 +53,34 @@ class Services {
 
   /// Notes: Notes/ in the app's folder, or a folder the user picked (an
   /// Obsidian vault).
-  late final notebook = Notebook(_vault(), cache: File('${support.path}/notes-index.json'));
+  late final notebook = Notebook(
+    _vault(),
+    cache: File('${support.path}/notes-index.json'),
+    snapshots: Snapshots(Directory('${support.path}/snapshots')),
+  )
+    ..templatesFolder = settings.get('notes.templates') ?? 'Templates'
+    ..dailyFolder = settings.get('daily.folder') ?? 'Daily'
+    ..dailyFormat = settings.get('daily.format') ?? 'YYYY-MM-DD'
+    ..dailyTemplate = settings.get('daily.template') ?? '';
+
+  /// Settings › Notes: where daily notes go and how they are named, the template they start from, where
+  /// templates and attachments are.
+  void setNotesSetting(String key, String value) {
+    settings.set(key, value.trim());
+    switch (key) {
+      case 'notes.templates':
+        notebook.templatesFolder = value.trim().isEmpty ? 'Templates' : value.trim();
+      case 'daily.folder':
+        notebook.dailyFolder = value.trim();
+      case 'daily.format':
+        notebook.dailyFormat = value.trim().isEmpty ? 'YYYY-MM-DD' : value.trim();
+      case 'daily.template':
+        notebook.dailyTemplate = value.trim();
+    }
+  }
+
+  /// Where images added to notes go ('' : next to the note).
+  String get attachmentsFolder => settings.get('notes.attachments') ?? 'attachments';
 
   Vault _vault() {
     final uri = settings.get('notes.vault') ?? '';

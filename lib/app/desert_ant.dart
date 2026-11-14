@@ -141,9 +141,9 @@ class DesertAnt {
   Future<List<String>> customVoices() async => [...((await _call<List>('speech.custom')) ?? const []).cast<String>()];
 
   /// Let the user pick a file; its temporary copy and its name, or null when they cancelled.
-  Future<({String path, String name})?> pickFile() async {
+  Future<({String path, String name})?> pickFile({String? mime}) async {
     try {
-      final m = await _permissions.invokeMethod<Map>('pickFile');
+      final m = await _permissions.invokeMethod<Map>('pickFile', {'mime': ?mime});
       return m == null ? null : (path: m['path'] as String, name: m['name'] as String);
     } on MissingPluginException {
       return null;

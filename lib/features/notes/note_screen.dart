@@ -4,6 +4,7 @@
 library;
 
 import 'dart:async';
+import 'dart:io' show File;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -29,7 +30,10 @@ import '../settings/settings_tiles.dart';
 import 'audio_player.dart';
 import 'markdown_view.dart';
 import 'navigation.dart';
-import '../../core/notes/obsidian.dart' show forReading, headingsOf;
+import 'note_tools.dart';
+import '../../core/notes/fuzzy.dart';
+import '../../core/notes/moment.dart';
+import '../../core/notes/obsidian.dart' show countWords, forReading, headingsOf;
 import 'notes_screen.dart' show pickFolder;
 import 'read_aloud_sheet.dart';
 import 'record_screen.dart';
@@ -60,6 +64,9 @@ class _NoteScreenState extends State<NoteScreen> {
 
   /// Note titles to offer while the cursor is inside an open [[.
   List<String> _suggest = const [];
+
+  /// Slash commands to offer after a "/" typed at a word's start.
+  List<SlashCommand> _slash = const [];
 
   /// The text before the last change, to see a line just finished.
   String _last = '';
@@ -139,6 +146,24 @@ class _NoteScreenState extends State<NoteScreen> {
       Command('Outline', Icons.toc_rounded, _outline),
       if (note != null && !readOnly)
         Command(_book.isBookmarked(note) ? 'Remove bookmark' : 'Bookmark', Icons.bookmark_outline_rounded, _toggleBookmark),
+      if (!readOnly) ...[
+        Command('Edit properties', Icons.tune_rounded, _properties),
+        Command('Insert template', Icons.description_outlined, _insertTemplate),
+        Command('Insert today\'s date', Icons.today_rounded, () => _insert(formatMoment(DateTime.now(), 'YYYY-MM-DD'))),
+        Command('Insert time', Icons.schedule_rounded, () => _insert(formatMoment(DateTime.now(), 'HH:mm'))),
+        Command('Add a picture', Icons.image_outlined, _addImage),
+        Command('Extract selection to a new note', Icons.call_split_rounded, _extract),
+        Command('Merge into another note', Icons.call_merge_rounded, _mergeInto),
+        Command('File recovery', Icons.history_rounded, _recovery),
+      ],
+      if (note != null && (note.folder == _book.dailyFolder || note.folder.startsWith('${_book.dailyFolder}/'))) ...[
+        Command('Previous daily note', Icons.chevron_left_rounded, () => _adjacentDaily(-1)),
+        Command('Next daily note', Icons.chevron_right_rounded, () => _adjacentDaily(1)),
+      ],
+      Command('Word count', Icons.numbers_rounded, () {
+        final c = countWords(withoutProperties(_text.text));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${c.words} words · ${c.characters} characters')));
+      }),
       Command('Copy link to this note', Icons.link_rounded, () async {
         await Clipboard.setData(ClipboardData(text: '[[${note?.title ?? ''}]]'));
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Link copied')));
@@ -342,13 +367,19 @@ class _NoteScreenState extends State<NoteScreen> {
     _last = text;
     final before = text.substring(0, _text.selection.baseOffset.clamp(0, text.length));
     final open = RegExp(r'\[\[([^\[\]\n|#]*)$').firstMatch(before);
+    final slash = open == null ? RegExp(r'(?:^|\s)/([\p{L}\p{N} ]{0,24})$', unicode: true).firstMatch(before) : null;
     setState(() {
       _suggest = open == null
           ? const []
           : [
-              for (final n in _book.search(open[1]!))
-                if (n.path != _path && n.title.toLowerCase().contains(open[1]!.toLowerCase())) n.title,
+              for (final n in fuzzyRank(open[1]!, _book.notes, noteNames))
+                if (n.path != _path) n.title,
             ].take(8).toList();
+      _slash = slash == null
+          ? const []
+          : slash[1]!.isEmpty
+              ? slashCommands
+              : fuzzyRank(slash[1]!, slashCommands, (c) => [c.name]).take(8).toList();
     });
   }
 
@@ -400,6 +431,196 @@ class _NoteScreenState extends State<NoteScreen> {
       selection: TextSelection.collapsed(offset: start + title.length + 2),
     );
     _changed(_text.text);
+  }
+
+  /// A slash command picked: its text in place of "/what was typed".
+  void _runSlash(SlashCommand c) {
+    final at = _text.selection.isValid ? _text.selection.baseOffset : _text.text.length;
+    final start = _text.text.substring(0, at).lastIndexOf('/');
+    if (start < 0) return;
+    final insert = c.text(DateTime.now());
+    _text.value = TextEditingValue(
+      text: _text.text.replaceRange(start, at, insert),
+      selection: TextSelection.collapsed(offset: start + (c.cursor ?? insert.length)),
+    );
+    _changed(_text.text);
+  }
+
+  /// [snippet] where the cursor is (at the end when the editor has none), the editor opened.
+  void _insert(String snippet) {
+    final value = _text.value;
+    final at = value.selection.isValid ? value.selection.start : value.text.length;
+    final end = value.selection.isValid ? value.selection.end : at;
+    setState(() => _editing = true);
+    _text.value = TextEditingValue(
+      text: value.text.replaceRange(at, end, snippet),
+      selection: TextSelection.collapsed(offset: at + snippet.length),
+    );
+    _changed(_text.text);
+  }
+
+  Future<void> _properties() async {
+    await _flush();
+    if (!mounted) return;
+    final next = await editProperties(context, _text.text);
+    if (next == null || !mounted) return;
+    setState(() => _text.text = next);
+    _changed(next);
+    await _flush();
+  }
+
+  /// Obsidian's Templates: a template's properties added to the note's, its text at the cursor, {{date}} and
+  /// the rest filled in.
+  Future<void> _insertTemplate() async {
+    final templates = _book.templates;
+    if (templates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No templates yet: notes in the "${_book.templatesFolder}" folder are templates.')));
+      return;
+    }
+    final picked = await showModalBottomSheet<Note>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView(shrinkWrap: true, children: [
+          for (final t in templates)
+            ListTile(leading: const Icon(Icons.description_outlined), title: Text(t.title), onTap: () => Navigator.pop(context, t)),
+        ]),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    final title = _book.byPath(_path)?.title ?? '';
+    final filled = applyTemplate(picked.text, title: title, now: DateTime.now());
+    var text = _text.text;
+    for (final key in propertyKeys(filled)) {
+      if (propertyKeys(text).contains(key)) continue;
+      text = withPropertyValue(text, key,
+          propertyKind(filled, key) == 'list' ? propertyList(filled, key) : (propertyText(filled, key) ?? ''));
+    }
+    if (text != _text.text) {
+      final shift = text.length - _text.text.length;
+      final sel = _text.selection;
+      _text.value = TextEditingValue(
+        text: text,
+        selection: sel.isValid ? TextSelection.collapsed(offset: sel.start + shift) : TextSelection.collapsed(offset: text.length),
+      );
+    }
+    _insert(withoutProperties(filled));
+  }
+
+  /// A picture from the phone, copied into the vault's attachments folder and embedded at the cursor.
+  Future<void> _addImage() async {
+    final services = ServicesScope.of(context);
+    final picked = await services.ant.pickFile(mime: 'image/*');
+    if (picked == null || !mounted) return;
+    final note = _book.byPath(_path);
+    final folder = services.attachmentsFolder.isEmpty ? (note?.folder ?? '') : services.attachmentsFolder;
+    final dot = picked.name.lastIndexOf('.');
+    final base = dot > 0 ? picked.name.substring(0, dot) : picked.name, ext = dot > 0 ? picked.name.substring(dot) : '';
+    var name = picked.name;
+    for (var n = 2; await _book.vault.locate(folder.isEmpty ? name : '$folder/$name') != null; n++) {
+      name = '$base $n$ext';
+    }
+    final mime = switch (ext.toLowerCase()) {
+      '.png' => 'image/png',
+      '.gif' => 'image/gif',
+      '.webp' => 'image/webp',
+      '.svg' => 'image/svg+xml',
+      _ => 'image/jpeg',
+    };
+    try {
+      await _book.vault.attach(folder.isEmpty ? name : '$folder/$name', File(picked.path), mime);
+    } on Object catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('The picture could not be added: $e')));
+      return;
+    }
+    _insert('![[$name]]\n');
+  }
+
+  /// Note composer: this note's text added to another, and this one put in the trash.
+  Future<void> _mergeInto() async {
+    await _flush();
+    if (!mounted) return;
+    final source = _book.byPath(_path);
+    if (source == null) return;
+    final target = await showQuickSwitcher(context, book: _book, recent: ServicesScope.of(context).recent);
+    if (target == null || target.path == source.path || !mounted) return;
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Merge into "${target.title}"?'),
+        content: Text('"${source.title}" is added to the end of "${target.title}", links to it are changed to '
+            '"${target.title}", and it goes to the trash.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Merge')),
+        ],
+      ),
+    );
+    if (sure != true || !mounted) return;
+    _saved = _text.text;
+    final merged = await _book.merge(source, target);
+    if (mounted) {
+      await Navigator.pushReplacement(context, MaterialPageRoute<void>(builder: (_) => NoteScreen(path: merged.path)));
+    }
+  }
+
+  /// Note composer: the selected text made a note of its own, a link to it left in its place.
+  Future<void> _extract() async {
+    final sel = _text.selection;
+    if (!_editing || !sel.isValid || sel.isCollapsed) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select some text in the editor first.')));
+      return;
+    }
+    final part = _text.text.substring(sel.start, sel.end).trim();
+    final guess = part.split('\n').first.replaceAll(RegExp(r'^#+\s*|[*_`]'), '').trim();
+    final name = TextEditingController(text: guess.length > 60 ? guess.substring(0, 60) : guess);
+    final title = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Extract to a new note'),
+        content: TextField(controller: name, autofocus: true, decoration: const InputDecoration(hintText: 'Title')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, name.text), child: const Text('Extract')),
+        ],
+      ),
+    );
+    name.dispose();
+    if (title == null || title.trim().isEmpty || !mounted) return;
+    await _flush();
+    final note = _book.byPath(_path);
+    if (note == null) return;
+    final made = await _book.extract(note, sel.start, sel.end, title.trim());
+    final now = _book.byPath(_path)?.text ?? _text.text;
+    setState(() => _text.text = _saved = _last = now);
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Made "${made.title}"')));
+  }
+
+  Future<void> _recovery() async {
+    await _flush();
+    final snapshots = _book.snapshots;
+    final note = _book.byPath(_path);
+    if (snapshots == null || note == null || !mounted) return;
+    final text = await Navigator.push<String>(
+        context, MaterialPageRoute(builder: (_) => RecoveryScreen(snapshots: snapshots, path: note.path, title: note.title)));
+    if (text == null || !mounted) return;
+    setState(() => _text.text = text);
+    _changed(text);
+    await _flush();
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Restored')));
+  }
+
+  Future<void> _adjacentDaily(int step) async {
+    await _flush();
+    final note = _book.byPath(_path);
+    final other = note == null ? null : _book.adjacentDaily(note, step);
+    if (!mounted) return;
+    if (other == null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No daily note ${step < 0 ? 'before' : 'after'} this one')));
+      return;
+    }
+    await Navigator.pushReplacement(context, MaterialPageRoute<void>(builder: (_) => NoteScreen(path: other.path)));
   }
 
   /// A toolbar edit on the text and its selection.
@@ -688,11 +909,13 @@ class _NoteScreenState extends State<NoteScreen> {
               'outline' => _outline(),
               'bookmark' => _toggleBookmark(),
               'commands' => _palette(),
+              'properties' => _properties(),
               _ => _rename(),
             },
             itemBuilder: (context) => [
               const PopupMenuItem(value: 'commands', child: Text('Command palette')),
               const PopupMenuItem(value: 'outline', child: Text('Outline')),
+              if (!readOnly) const PopupMenuItem(value: 'properties', child: Text('Properties')),
               if (!readOnly && note != null)
                 PopupMenuItem(value: 'bookmark', child: Text(book.isBookmarked(note) ? 'Remove bookmark' : 'Bookmark')),
               if (!readOnly) ...const [
@@ -735,7 +958,28 @@ class _NoteScreenState extends State<NoteScreen> {
                   ),
                 ),
               ),
-              if (_suggest.isEmpty && journal != null) journal,
+              if (_suggest.isEmpty && _slash.isEmpty && journal != null) journal,
+              if (_slash.isNotEmpty)
+                SizedBox(
+                  height: 48,
+                  child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12), children: [
+                    for (final c in _slash) ...[
+                      _PillChip(icon: c.icon, label: c.name, onPressed: () => _runSlash(c)),
+                      const SizedBox(width: 8),
+                    ],
+                  ]),
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 2),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Builder(builder: (context) {
+                    final c = countWords(withoutProperties(_text.text));
+                    return Text('${c.words} words · ${c.characters} characters',
+                        style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant));
+                  }),
+                ),
+              ),
               if (_suggest.isNotEmpty)
                 SizedBox(
                   height: 48,

@@ -59,6 +59,8 @@ class Note {
 }
 
 String _plain(String line) => line
+    .replaceAll(RegExp(r'%%.*?%%'), '')
+    .replaceAll('==', '')
     .replaceAllMapped(RegExp(r'\[\[([^\]|]+)(?:\|([^\]]*))?\]\]'), (m) => (m[2] ?? m[1]!).split('#').first)
     .replaceAllMapped(RegExp(r'!?\[([^\]]*)\]\([^)]*\)'), (m) => m[1]!)
     .replaceAll(RegExp(r'\*\*|__|~~|`'), '')

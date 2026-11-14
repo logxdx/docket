@@ -27,8 +27,8 @@ class Snapshots {
     if (!d.existsSync()) return const [];
     final out = <({DateTime at, File file})>[];
     for (final f in d.listSync().whereType<File>()) {
-      final ms = int.tryParse(f.uri.pathSegments.last.replaceFirst('.md', ''));
-      if (ms != null) out.add((at: DateTime.fromMillisecondsSinceEpoch(ms), file: f));
+      final us = int.tryParse(f.uri.pathSegments.last.replaceFirst('.md', ''));
+      if (us != null) out.add((at: DateTime.fromMicrosecondsSinceEpoch(us), file: f));
     }
     return out..sort((a, b) => b.at.compareTo(a.at));
   }
@@ -39,7 +39,8 @@ class Snapshots {
     final have = of(path);
     if (have.isNotEmpty && (at.difference(have.first.at) < every || have.first.file.readAsStringSync() == text)) return;
     final d = _of(path)..createSync(recursive: true);
-    File('${d.path}/${at.millisecondsSinceEpoch}.md').writeAsStringSync(text);
+    // Named by the microsecond: two saves in one millisecond are still two copies.
+    File('${d.path}/${at.microsecondsSinceEpoch}.md').writeAsStringSync(text);
     // The new copy and the [keep] - 1 newest before it stay.
     for (final old in have.skip(keep - 1)) {
       if (old.file.existsSync()) old.file.deleteSync();

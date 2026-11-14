@@ -15,6 +15,7 @@ import '../settings/settings_screen.dart';
 import '../settings/settings_tiles.dart';
 import 'graph_screen.dart';
 import 'navigation.dart';
+import 'note_tools.dart';
 import 'note_screen.dart';
 import 'record_screen.dart';
 import 'trash_screen.dart';
@@ -252,6 +253,15 @@ class _NotesScreenState extends State<NotesScreen> {
         await _palette();
       case 'random':
         if (_book.random() case final n?) await _open(n);
+      case 'tags':
+        final tag = await Navigator.push<String>(context, MaterialPageRoute(builder: (_) => TagsScreen(book: _book)));
+        if (tag != null) {
+          _tag = tag;
+          _selected.clear();
+        }
+      case 'unique':
+        final note = await _book.createUnique(folder: _flat ? '' : _folder);
+        if (mounted) await _open(note, edit: true);
       case 'graph':
         await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const GraphScreen()));
       case 'vault':
@@ -275,6 +285,7 @@ class _NotesScreenState extends State<NotesScreen> {
       if (!readOnly) ...[
         Command('New note', Icons.note_add_outlined, _new),
         Command('New folder', Icons.create_new_folder_outlined, _newFolder),
+        Command('New unique note', Icons.fiber_new_outlined, () => _menu('unique')),
         Command("Today's note", Icons.today_rounded, () async {
           final note = await _book.daily();
           if (mounted) await _open(note, edit: true);
@@ -284,6 +295,7 @@ class _NotesScreenState extends State<NotesScreen> {
       ],
       Command('Random note', Icons.casino_outlined, () => _menu('random')),
       Command('Show bookmarks', Icons.bookmarks_outlined, () => _menu('view-bookmarks')),
+      Command('Tags', Icons.tag_rounded, () => _menu('tags')),
       Command('Show folders', Icons.folder_outlined, () => _menu('view-folders')),
       Command('Show all notes', Icons.notes_rounded, () => _menu('view-all')),
       Command('Sort by name', Icons.sort_by_alpha_rounded, () => _menu('sort-name')),
@@ -432,6 +444,7 @@ class _NotesScreenState extends State<NotesScreen> {
             const PopupMenuItem(value: 'commands', child: ListTile(leading: Icon(Icons.terminal_rounded), title: Text('Command palette'))),
             if (!readOnly) const PopupMenuItem(value: 'folder', child: ListTile(leading: Icon(Icons.create_new_folder_outlined), title: Text('New folder'))),
             const PopupMenuItem(value: 'random', child: ListTile(leading: Icon(Icons.casino_outlined), title: Text('Random note'))),
+            const PopupMenuItem(value: 'tags', child: ListTile(leading: Icon(Icons.tag_rounded), title: Text('Tags'))),
             const PopupMenuDivider(),
             CheckedPopupMenuItem(value: 'view-folders', checked: _view == 'folders', child: const Text('Folders')),
             CheckedPopupMenuItem(value: 'view-all', checked: _view == 'all', child: const Text('All notes')),

@@ -35,7 +35,9 @@ class MainActivity : FlutterActivity() {
                 "pickFile" -> {
                     pickingFile?.success(null)
                     pickingFile = result
-                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+                    // A kind of file when asked for ("image/*" for a picture to add to a note), else any.
+                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                        .setType(call.argument<String>("mime") ?: "*/*")
                     try {
                         startActivityForResult(intent, PICK)
                     } catch (e: Exception) {
