@@ -43,7 +43,7 @@ flutter build apk --debug
      keeps them): a `title` and a `description` (**Title**) and topic
      `tags` (**Gist**).
   Saving is instant; a recording interrupted by the app closing carries on
-  at the next start. With a model server set, a summary is written too.
+  at the next start. With a model server set (Settings › AI), a summary is written too.
 - **Typed notes**, as they are saved (`lib/app/enricher.dart`): an emoji on
   each task and each timed entry of a daily note (**Emo**: "- [ ] 🦷
   Dentist"), and front matter (`lib/core/notes/properties.dart`): topic
@@ -52,10 +52,16 @@ flutter build apk --debug
   to keep none), and a `title` for one still called "Untitled" (**Title**,
   else its first words), which renames it. Each can be turned off in
   Settings › On this phone.
-- **AI** (`lib/core/ai/model.dart`): Summarise, Tidy up and recordings'
+- **AI** (Settings › AI, `lib/core/ai/`): Summarise, Tidy up and recordings'
   summaries, from any server with the OpenAI-compatible chat API (llama-server
-  or Ollama on the phone or a computer, or a cloud provider), set in Settings.
-  Nothing is sent until one is set. The key is kept in secure storage.
+  or Ollama on a computer, or a cloud provider). Nothing is sent until one is
+  set; the key is kept in secure storage. Only the note's body is sent (its
+  front matter stays), and a `[[link]]` a model unlinked is restored. Each
+  job's prompt is a short role and a short task, editable (Settings › AI ›
+  Prompts) with a warning and a confirmation; Reset restores it. No language
+  model runs on the phone: the ones a phone can hold changed facts on these
+  jobs, and lost to Title, Gist and Emo on titles, tags and emoji
+  (`tool/language_models.md`).
 
 ## Offline, on the phone
 Every model runs on the phone and the app needs no network. The models come

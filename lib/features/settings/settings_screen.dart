@@ -1,7 +1,7 @@
 /// Settings, as drawn (Docket Settings redesign): five short groups, one line
 /// per setting with its value on the right, and the details one tap away: the
-/// transcript model and the reading voice in sheets, the model server and the
-/// credits on pages of their own.
+/// transcript model and the reading voice in sheets, AI and the credits on
+/// pages of their own.
 library;
 
 import 'dart:async';
@@ -13,8 +13,11 @@ import '../../app/desert_ant.dart' show ModelStatus;
 import '../../app/services.dart';
 import '../../app/theme.dart';
 import '../../core/ai/model.dart';
+import '../../core/ai/prompts.dart';
 import '../../core/notes/read_aloud.dart' show readingVoiceRegions;
 import '../../core/voice/spoken.dart' show Engine;
+
+part 'ai_screen.dart';
 
 /// The app's version, as pubspec.yaml has it.
 const appVersion = '0.1.0';
@@ -62,10 +65,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ]),
             _Group('More', [
               _Row(
-                'AI model server',
+                'AI',
                 value: _s.modelUrl.isEmpty ? 'Off' : (Uri.tryParse(_s.modelUrl)?.host ?? 'On'),
                 onTap: () async {
-                  await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const _ServerScreen()));
+                  await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const _AiScreen()));
                   if (mounted) setState(() {});
                 },
               ),
@@ -74,7 +77,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ]),
             Padding(
               padding: const EdgeInsets.fromLTRB(28, 12, 28, 0),
-              child: Text('Everything runs on this phone. Nothing is sent anywhere.',
+              child: Text(
+                  _s.modelUrl.isNotEmpty
+                      ? 'Summaries and Tidy up go to your model server. Everything else runs on this phone.'
+                      : 'Everything runs on this phone. Nothing is sent anywhere.',
                   style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.45)),
             ),
           ]),
@@ -725,113 +731,6 @@ class _VoiceSheetState extends State<_VoiceSheet> {
 }
 
 /// The model server for Summarise, Tidy up and recording summaries: optional, used only when asked.
-class _ServerScreen extends StatefulWidget {
-  const _ServerScreen();
-
-  @override
-  State<_ServerScreen> createState() => _ServerScreenState();
-}
-
-class _ServerScreenState extends State<_ServerScreen> {
-  late final Services _s = ServicesScope.of(context);
-  late final _url = TextEditingController(text: _s.modelUrl);
-  late final _model = TextEditingController(text: _s.modelName);
-  late final _key = TextEditingController(text: _s.modelKey);
-  String _check = '';
-  bool _checking = false;
-
-  @override
-  void dispose() {
-    _url.dispose();
-    _model.dispose();
-    _key.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() => _s.setModel(url: _url.text, model: _model.text, key: _key.text);
-
-  Future<void> _checkModel() async {
-    await _save();
-    final server = _s.model;
-    if (server == null) {
-      setState(() => _check = 'Add the server address first.');
-      return;
-    }
-    setState(() {
-      _checking = true;
-      _check = '';
-    });
-    String result;
-    try {
-      final reply = await server.chat('Reply with the single word OK.', 'Are you there?', maxTokens: 16);
-      result = reply.isEmpty ? 'The server answered, but with nothing.' : 'Works: ${server.label} replied "$reply".';
-    } on ModelFailed catch (error) {
-      result = error.reason;
-    }
-    if (mounted) {
-      setState(() {
-        _checking = false;
-        _check = result;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final muted = theme.colorScheme.onSurfaceVariant;
-    Widget field(TextEditingController c, String label, String hint, {bool secret = false}) => Padding(
-          padding: const EdgeInsets.only(bottom: 18),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Padding(
-              padding: const EdgeInsets.only(left: 4, bottom: 6),
-              child: Text(label, style: theme.textTheme.labelLarge?.copyWith(color: muted)),
-            ),
-            TextField(
-              controller: c,
-              obscureText: secret,
-              autocorrect: false,
-              keyboardType: secret ? TextInputType.visiblePassword : TextInputType.url,
-              decoration: InputDecoration(
-                hintText: hint,
-                filled: true,
-                fillColor: theme.colorScheme.surfaceContainer,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-            ),
-          ]),
-        );
-    return PopScope(
-      onPopInvokedWithResult: (_, _) => _save(),
-      child: Scaffold(
-        appBar: AppBar(title: const Text('AI model server')),
-        body: ListView(padding: const EdgeInsets.fromLTRB(20, 4, 20, 24), children: [
-          Text(
-            'Optional. Used only for Summarise, Tidy up and recording summaries, and only when you ask. Any server '
-            'with the OpenAI-compatible API: llama-server or Ollama on this phone or your computer.',
-            style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.5),
-          ),
-          const SizedBox(height: 18),
-          field(_url, 'Address', 'http://127.0.0.1:8080/v1'),
-          field(_model, 'Model', 'The server\'s own'),
-          field(_key, 'API key', 'None needed', secret: true),
-          Row(children: [
-            FilledButton(onPressed: _checking ? null : _checkModel, child: const Text('Check')),
-            const SizedBox(width: 14),
-            if (_checking) const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)),
-            Expanded(
-              child: Text(
-                _check.isNotEmpty ? _check : (_s.modelUrl.isEmpty ? 'Not set: AI actions are off.' : ''),
-                style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.4),
-              ),
-            ),
-          ]),
-        ]),
-      ),
-    );
-  }
-}
-
 /// Docket, its version, and the credits the on-device models' licences ask for.
 class _AboutScreen extends StatelessWidget {
   const _AboutScreen();

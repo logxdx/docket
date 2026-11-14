@@ -11,9 +11,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:saf_util/saf_util.dart';
 
 import '../core/ai/model.dart';
+import '../core/ai/prompts.dart';
 import '../core/notes/notebook.dart';
 import '../core/notes/vault.dart';
-import '../core/voice/recording.dart';
 import '../core/voice/spoken.dart' show Engine;
 import '../core/voice/summaries.dart';
 import 'desert_ant.dart';
@@ -131,20 +131,45 @@ class Services {
   }
 
   Future<String> _summarise(String transcript) async {
-    final server = model;
-    if (server == null) throw const SummaryFailed('No model server to summarise with: add one in Settings.');
+    final ai = model;
+    if (ai == null) throw const SummaryFailed('No model server to summarise with: add one in Settings › AI.');
     try {
-      return await server.chat(recordingPrompt, transcript, maxTokens: 800);
+      return await ask(ai, PromptKind.recording, transcript, maxTokens: 800);
     } on ModelFailed catch (error) {
       throw SummaryFailed(error.reason);
     }
   }
 
-  /// The model server for AI on notes; null until one is set.
+  /// The model server for AI on notes; null until one is set. (Not a model on the phone: the small ones a phone
+  /// can run invent and change facts on these jobs, tool/language_models.md.)
   ModelServer? get model {
     final url = settings.get('ai.url') ?? '';
     return url.isEmpty ? null : ModelServer(url: url, model: settings.get('ai.model') ?? '', key: _key);
   }
+
+  /// [kind]'s role (the system message): the user's, else the default.
+  String promptRole(PromptKind kind) => _own('prompt.${kind.name}.role') ?? kind.defaultRole;
+
+  /// [kind]'s task (before the note): the user's, else the default.
+  String promptTask(PromptKind kind) => _own('prompt.${kind.name}.task') ?? kind.defaultTask;
+
+  String? _own(String key) {
+    final text = settings.get(key) ?? '';
+    return text.trim().isEmpty ? null : text;
+  }
+
+  /// Whether the user changed [kind]'s prompt.
+  bool promptEdited(PromptKind kind) => !isDefaultPrompt(kind, promptRole(kind), promptTask(kind));
+
+  /// Keep [role] and [task] as [kind]'s prompt; a default (or empty) one is the default again.
+  void setPrompt(PromptKind kind, {required String role, required String task}) {
+    settings.set('prompt.${kind.name}.role', role.trim() == kind.defaultRole.trim() ? '' : role);
+    settings.set('prompt.${kind.name}.task', task.trim() == kind.defaultTask.trim() ? '' : task);
+  }
+
+  /// [ai]'s answer for [kind] on [text], with the prompt as set.
+  Future<String> ask(ModelServer ai, PromptKind kind, String text, {int maxTokens = 2048}) =>
+      ai.chat(promptRole(kind), withTask(promptTask(kind), text), maxTokens: maxTokens);
 
   String get modelUrl => settings.get('ai.url') ?? '';
   String get modelName => settings.get('ai.model') ?? '';

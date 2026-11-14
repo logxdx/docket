@@ -13,6 +13,8 @@ import '../../app/safe_image.dart';
 import '../../app/services.dart';
 import '../../app/theme.dart';
 import '../../core/ai/model.dart';
+import '../../core/ai/prompts.dart';
+import '../../core/ai/repair.dart';
 import '../../app/enricher.dart';
 import '../../app/recordings.dart';
 import '../../core/notes/enrich.dart';
@@ -369,7 +371,7 @@ class _NoteScreenState extends State<NoteScreen> {
     if (!mounted) return;
     if (server == null) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: const Text('No model server yet. Add one in Settings.'),
+        content: const Text('No model server yet. Add one in Settings › AI.'),
         action: SnackBarAction(
           label: 'Settings',
           onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const SettingsScreen())),
@@ -378,22 +380,17 @@ class _NoteScreenState extends State<NoteScreen> {
       return;
     }
     final model = server.label;
-    final (system, label) = switch (job) {
-      'summarise' => (
-          'Summarise the note in a few bullet points. Keep names, numbers and [[links]] as they are. Reply with the summary only.',
-          'Summary',
-        ),
-      _ => (
-          'Tidy up the note: fix spelling and grammar, give it clear headings and lists where it helps. Keep every fact, '
-              '[[link]] and #tag. Do not add anything. Reply with the whole note only, in Markdown.',
-          'Tidied note',
-        ),
+    final (kind, label) = switch (job) {
+      'summarise' => (PromptKind.summarise, 'Summary'),
+      _ => (PromptKind.tidy, 'Tidied note'),
     };
     final readOnly = _book.readOnly;
     final result = ValueNotifier<String?>(null);
     unawaited(() async {
       try {
-        result.value = await server.chat(system, _text.text, maxTokens: 2048);
+        // The body only: given the front matter too, a small model rewrites the note's properties into its text.
+        final body = withoutProperties(_text.text);
+        result.value = keepLinks(body, await services.ask(server, kind, body));
       } on ModelFailed catch (error) {
         result.value = 'Failed: ${error.reason}';
       } on Object catch (error) {
@@ -456,7 +453,9 @@ class _NoteScreenState extends State<NoteScreen> {
     if (text == null || choice == null) return;
     switch (choice) {
       case 'replace':
-        _text.text = text;
+        // The tidied body under the note's own front matter, as it is now.
+        final now = _text.text;
+        _text.text = '${now.substring(0, now.length - withoutProperties(now).length)}$text';
       case 'append':
         _text.text = '${_text.text.trimRight()}\n\n## $label\n\n$text\n';
       case 'copy':

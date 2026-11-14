@@ -5,10 +5,6 @@
 /// marker holds its place) and the raw transcript, word for word.
 library;
 
-/// What the chat model is asked to make of a transcript.
-const recordingPrompt = 'Summarize the transcript and write the action items (skip action items if none exist in the '
-    'transcript):\n## Summary\nIn bullet points only.\n## Action items\nEach as "- [ ] who: what"';
-
 String _two(int n) => n.toString().padLeft(2, '0');
 
 /// "3 min 12 s", "45 s".
