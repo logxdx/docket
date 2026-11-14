@@ -17,6 +17,9 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      # At job level, so a step's `if` can see whether a release key is set.
+      KEYSTORE_B64: ${{ secrets.DOCKET_KEYSTORE_BASE64 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,9 +34,7 @@ jobs:
           channel: stable
           cache: true
       - name: Signing key
-        if: ${{ env.KEYSTORE_B64 != '' }}
-        env:
-          KEYSTORE_B64: ${{ secrets.DOCKET_KEYSTORE_BASE64 }}
+        if: env.KEYSTORE_B64 != ''
         run: |
           echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/docket.jks"
           echo "DOCKET_KEYSTORE=$RUNNER_TEMP/docket.jks" >> "$GITHUB_ENV"
