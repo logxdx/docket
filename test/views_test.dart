@@ -23,12 +23,16 @@ void main() {
       ..x = 10.4
       ..text = 'Hi';
     final added = c.addText(0, 200, 'New');
+    expect(c.addText(0, 200, 'Beside').x, 40, reason: 'not on top of the card already there');
+    c.nodes.first
+      ..x = 10.2
+      ..x = 10.6;
     c.connect(added.id, 'a');
     c.remove('b');
     final back = jsonDecode(c.toJson()) as Map;
     expect(back['metadata'], {'version': '1.0'});
     expect((back['nodes'] as List).first, containsPair('styleAttributes', {}));
-    expect((back['nodes'] as List).first['x'], 10);
+    expect((back['nodes'] as List).first['x'], 11);
     expect((back['edges'] as List).length, 1);
     expect(CanvasDoc.parse('').nodes, isEmpty);
   });
@@ -82,6 +86,7 @@ views:
       final table = base.views.first;
       expect(table.columns, ['file.name', 'status', 'formula.hours']);
       expect(base.nameOf('status'), 'Status');
+      expect(base.nameOf('file.mtime'), 'Modified');
       final rows = base.rows(book, table);
       expect(rows.map((n) => n.title), ['Ulysses', 'Dune']);
       expect(Base.show(base.value('formula.hours', rows.last, book)), '12');

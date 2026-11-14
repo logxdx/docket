@@ -146,7 +146,7 @@ class _NoteScreenState extends State<NoteScreen> {
       if (!readOnly) Command(_editing ? 'Reading view' : 'Edit', _editing ? Icons.visibility_outlined : Icons.edit_outlined, _toggleEditing),
       Command('Outline', Icons.toc_rounded, _outline),
       Command('Start presentation', Icons.slideshow_outlined, () => Navigator.push(context,
-          MaterialPageRoute<void>(builder: (_) => SlidesScreen(text: _text.text, title: note?.title ?? '')))),
+          MaterialPageRoute<void>(builder: (_) => SlidesScreen(text: _text.text, title: note?.title ?? '', folder: note?.folder ?? '')))),
       if (note != null && !readOnly)
         Command(_book.isBookmarked(note) ? 'Remove bookmark' : 'Bookmark', Icons.bookmark_outline_rounded, _toggleBookmark),
       if (!readOnly) ...[

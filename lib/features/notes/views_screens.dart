@@ -7,6 +7,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
+import '../../app/safe_image.dart';
 import '../../app/services.dart';
 import '../../app/theme.dart';
 import '../../core/notes/bases.dart';
@@ -18,6 +19,20 @@ import '../../core/notes/vault.dart';
 import 'markdown_view.dart';
 import 'navigation.dart';
 import 'note_screen.dart';
+
+/// A link tapped on a canvas card or a slide: a note opens (at its heading), a web link in the browser.
+void _openLink(BuildContext context, Notebook book, String url) {
+  if (url.startsWith(noteScheme)) {
+    final target = Uri.decodeComponent(url.substring(noteScheme.length));
+    final note = book.byTitle(target.split(RegExp(r'[#^]')).first.trim());
+    if (note == null) return;
+    final hash = target.indexOf('#');
+    final heading = hash >= 0 && !target.substring(hash + 1).startsWith('^') ? target.substring(hash + 1).trim() : null;
+    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => NoteScreen(path: note.path, anchor: heading)));
+  } else if (Uri.tryParse(url) case final uri? when safeLink(uri)) {
+    ServicesScope.of(context).ant.openLink(url);
+  }
+}
 
 /// A canvas: cards on a plane to pan and zoom. Drag a card to move it; hold one to edit, connect or delete it;
 /// add a text card or a note from the buttons. Saved as it changes.
@@ -43,6 +58,23 @@ class _CanvasScreenState extends State<CanvasScreen> {
 
   /// A card waiting for the one an arrow goes to.
   String? _connecting;
+
+  /// The size of the screen's canvas area, from the last layout.
+  Size _viewport = Size.zero;
+  bool _fitted = false;
+
+  /// Zoom and pan so every card shows.
+  void _fit() {
+    final doc = _doc;
+    if (doc == null || _viewport.isEmpty) return;
+    final b = doc.bounds;
+    final w = b.right - b.left + 80, h = b.bottom - b.top + 80;
+    final scale = min(1.0, min(_viewport.width / w, _viewport.height / h));
+    final cx = b.left + _origin.dx + (b.right - b.left) / 2, cy = b.top + _origin.dy + (b.bottom - b.top) / 2;
+    _view.value = Matrix4.identity()
+      ..translateByDouble(_viewport.width / 2 - cx * scale, _viewport.height / 2 - cy * scale, 0, 1)
+      ..scaleByDouble(scale, scale, scale, 1);
+  }
 
   @override
   void didChangeDependencies() {
@@ -178,7 +210,7 @@ class _CanvasScreenState extends State<CanvasScreen> {
         IconButton(
           tooltip: 'Fit to screen',
           icon: const Icon(Icons.fit_screen_outlined),
-          onPressed: () => setState(() => _view.value = Matrix4.identity()),
+          onPressed: _fit,
         ),
       ]),
       floatingActionButton: doc == null || _book.readOnly
@@ -193,6 +225,11 @@ class _CanvasScreenState extends State<CanvasScreen> {
           : doc == null
               ? const Center(child: CircularProgressIndicator())
               : LayoutBuilder(builder: (context, box) {
+                  _viewport = box.biggest;
+                  if (!_fitted) {
+                    _fitted = true;
+                    WidgetsBinding.instance.addPostFrameCallback((_) => _fit());
+                  }
                   final b = doc.bounds;
                   final width = max(box.maxWidth, b.right + _origin.dx + _margin);
                   final height = max(box.maxHeight, b.bottom + _origin.dy + _margin);
@@ -264,7 +301,7 @@ class _Card extends StatelessWidget {
       );
     }
     final Widget content = switch (node.type) {
-      'text' => NoteMarkdown(node.text, onLink: (_) {}),
+      'text' => NoteBody(forReading(node.text), book: book, folder: '', onLink: (url) => _openLink(context, book, url)),
       'file' => () {
           final note = book.byPath(node.file);
           if (note == null) {
@@ -273,7 +310,8 @@ class _Card extends StatelessWidget {
           return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(note.title, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
             const SizedBox(height: 6),
-            NoteMarkdown(withoutProperties(note.text), onLink: (_) {}),
+            NoteBody(forReading(withoutProperties(note.text)),
+                book: book, folder: note.folder, onLink: (url) => _openLink(context, book, url)),
           ]);
         }(),
       'link' => Row(children: [
@@ -499,6 +537,12 @@ class _BaseView extends StatelessWidget {
                     for (final c in columns.where((c) => c != 'file.name'))
                       Text('${base.nameOf(c)}: ${Base.show(base.value(c, n, book))}',
                           maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall),
+                    const SizedBox(height: 6),
+                    Expanded(
+                      child: Text(n.preview,
+                          overflow: TextOverflow.fade,
+                          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                    ),
                   ]),
                 ),
               ),
@@ -537,10 +581,13 @@ class _BaseView extends StatelessWidget {
 
 /// A note as slides: each part between "---" lines a page, swiped or tapped through.
 class SlidesScreen extends StatefulWidget {
-  const SlidesScreen({super.key, required this.text, required this.title});
+  const SlidesScreen({super.key, required this.text, required this.title, this.folder = ''});
 
   final String text;
   final String title;
+
+  /// The note's folder, for its pictures.
+  final String folder;
 
   @override
   State<SlidesScreen> createState() => _SlidesScreenState();
@@ -559,7 +606,9 @@ class _SlidesScreenState extends State<SlidesScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final slides = slidesOf(forReading(withoutProperties(widget.text)));
+    final book = ServicesScope.of(context).notebook;
+    // Cut first: the footnotes forReading adds below a --- line are not a slide of their own.
+    final slides = [for (final s in slidesOf(withoutProperties(widget.text))) forReading(s)];
     final big = theme.copyWith(
       textTheme: theme.textTheme.copyWith(bodyLarge: theme.textTheme.headlineSmall?.copyWith(height: 1.4)),
     );
@@ -584,7 +633,7 @@ class _SlidesScreenState extends State<SlidesScreen> {
                   child: Center(
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.all(32),
-                      child: NoteMarkdown(slides[i], onLink: (_) {}),
+                      child: NoteBody(slides[i], book: book, folder: widget.folder, onLink: (url) => _openLink(context, book, url)),
                     ),
                   ),
                 ),

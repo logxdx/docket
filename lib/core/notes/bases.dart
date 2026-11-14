@@ -76,7 +76,22 @@ class Base {
       };
 
   /// What a column is called: its displayName, else its id without "formula.".
-  String nameOf(String id) => names[id] ?? (id.startsWith('formula.') ? id.substring(8) : id == 'file.name' ? 'Name' : id);
+  String nameOf(String id) =>
+      names[id] ??
+      switch (id) {
+        'file.name' => 'Name',
+        'file.mtime' => 'Modified',
+        'file.ctime' => 'Created',
+        'file.folder' => 'Folder',
+        'file.path' => 'Path',
+        'file.tags' => 'Tags',
+        'file.links' => 'Links',
+        'file.backlinks' => 'Backlinks',
+        'file.size' => 'Size',
+        'file.ext' => 'Extension',
+        _ when id.startsWith('formula.') => id.substring(8),
+        _ => id,
+      };
 
   /// The notes [view] shows, sorted and limited.
   List<Note> rows(Notebook book, BaseView view) {

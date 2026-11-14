@@ -24,8 +24,9 @@ class CanvasNode {
   String get label => raw['label'] as String? ?? '';
   String? get color => raw['color'] as String?;
 
-  set x(double v) => raw['x'] = v.round();
-  set y(double v) => raw['y'] = v.round();
+  // Kept exact while a card is dragged (rounding each small move would lose it); whole numbers in the file.
+  set x(double v) => raw['x'] = v;
+  set y(double v) => raw['y'] = v;
   set text(String v) => raw['text'] = v;
 }
 
@@ -68,7 +69,9 @@ class CanvasDoc {
 
   String toJson() => const JsonEncoder.withIndent('\t').convert({
         ..._rest,
-        'nodes': [for (final n in nodes) n.raw],
+        'nodes': [
+          for (final n in nodes) {for (final e in n.raw.entries) e.key: e.value is double ? (e.value! as double).round() : e.value},
+        ],
         'edges': [for (final e in edges) e.raw],
       });
 
@@ -85,16 +88,28 @@ class CanvasDoc {
     );
   }
 
+  /// [x], [y], moved down and right past any card already placed there.
+  (int, int) _free(double x, double y) {
+    var (fx, fy) = (x.round(), y.round());
+    while (nodes.any((n) => (n.x - fx).abs() < 20 && (n.y - fy).abs() < 20)) {
+      fx += 40;
+      fy += 40;
+    }
+    return (fx, fy);
+  }
+
   /// A new text card at [x], [y].
   CanvasNode addText(double x, double y, String text) {
-    final node = CanvasNode({'id': _id(), 'type': 'text', 'text': text, 'x': x.round(), 'y': y.round(), 'width': 260, 'height': 120});
+    final (fx, fy) = _free(x, y);
+    final node = CanvasNode({'id': _id(), 'type': 'text', 'text': text, 'x': fx, 'y': fy, 'width': 260, 'height': 120});
     nodes.add(node);
     return node;
   }
 
   /// A new card showing the note at [path].
   CanvasNode addFile(double x, double y, String path) {
-    final node = CanvasNode({'id': _id(), 'type': 'file', 'file': path, 'x': x.round(), 'y': y.round(), 'width': 400, 'height': 300});
+    final (fx, fy) = _free(x, y);
+    final node = CanvasNode({'id': _id(), 'type': 'file', 'file': path, 'x': fx, 'y': fy, 'width': 400, 'height': 300});
     nodes.add(node);
     return node;
   }

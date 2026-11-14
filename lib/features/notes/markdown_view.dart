@@ -13,6 +13,7 @@ import '../../app/theme.dart';
 import '../../core/notes/notebook.dart';
 import '../../core/notes/obsidian.dart';
 import '../../core/notes/properties.dart';
+import '../../core/voice/recording.dart';
 
 /// The scheme of a link to a note: notes-link:Title, or notes-link:Title#Heading.
 const noteScheme = 'notes-link:';
@@ -29,6 +30,41 @@ String wikiLinks(String text) => text.replaceAllMapped(
         return '[${label.replaceAll(']', r'\]')}]($noteScheme${Uri.encodeComponent(title + anchor)})';
       },
     );
+
+/// Markdown read as the reading view shows it, outside a note's own screen (a canvas card, a slide):
+/// callouts, embeds and pictures as there, recordings left out. [text] is already [forReading].
+class NoteBody extends StatelessWidget {
+  const NoteBody(this.text, {super.key, required this.book, required this.folder, required this.onLink});
+
+  final String text;
+  final Notebook book;
+
+  /// Where the text's note is, for pictures named relative to it.
+  final String folder;
+  final void Function(String url) onLink;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+      for (final (i, part) in noteParts(text).indexed)
+        switch (part) {
+          MarkdownPart(:final text) => NoteMarkdown(text, onLink: onLink),
+          CalloutPart() => CalloutBox(
+              key: ValueKey('callout:$i:${part.type}:${part.title}'),
+              type: part.type,
+              title: part.title,
+              fold: part.fold,
+              body: part.body,
+              onLink: onLink,
+            ),
+          EmbedPart(:final target) =>
+            EmbedBox(key: ValueKey('embed:$i:$target'), book: book, target: target, heading: part.heading, block: part.block, onLink: onLink),
+          ImagePart(:final name) => VaultImage(key: ValueKey('image:$i:$name'), book: book, name: name, folder: folder, size: part.size),
+          _ => const SizedBox.shrink(),
+        },
+    ]);
+  }
+}
 
 /// Markdown text of a note, rendered.
 class NoteMarkdown extends StatelessWidget {
