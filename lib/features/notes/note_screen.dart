@@ -28,6 +28,7 @@ import '../settings/settings_screen.dart';
 import '../settings/settings_tiles.dart';
 import 'audio_player.dart';
 import 'markdown_view.dart';
+import '../../core/notes/obsidian.dart' show forReading;
 import 'notes_screen.dart' show pickFolder;
 import 'read_aloud_sheet.dart';
 import 'record_screen.dart';
@@ -620,20 +621,31 @@ class _NoteScreenState extends State<NoteScreen> {
           : ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 32), children: [
               if (journal != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: journal),
               if (hasProperties(_text.text)) _Properties(text: _text.text),
-              // Task links are numbered over the whole note, before it is cut into parts.
-              for (final part in noteParts(withoutProperties(taskLinks(_text.text, taskScheme))))
+              // Task links are numbered over the whole note, and footnotes and comments read across it, before it
+              // is cut into parts.
+              for (final (i, part) in noteParts(forReading(withoutProperties(taskLinks(_text.text, taskScheme)))).indexed)
                 switch (part) {
                   MarkdownPart(:final text) => SelectionArea(child: NoteMarkdown(text, onLink: _onLink)),
+                  // Keyed by place and kind: a card added above (the properties) must not hand one callout's
+                  // folding to another.
                   CalloutPart() => CalloutBox(
+                      key: ValueKey('callout:$i:${part.type}:${part.title}'),
                       type: part.type,
                       title: part.title,
                       fold: part.fold,
                       body: part.body,
                       onLink: _onLink,
                     ),
-                  EmbedPart(:final target) =>
-                    EmbedBox(book: book, target: target, heading: part.heading, block: part.block, onLink: _onLink),
-                  ImagePart(:final name) => VaultImage(book: book, name: name, folder: note?.folder ?? '', size: part.size),
+                  EmbedPart(:final target) => EmbedBox(
+                      key: ValueKey('embed:$i:$target'),
+                      book: book,
+                      target: target,
+                      heading: part.heading,
+                      block: part.block,
+                      onLink: _onLink,
+                    ),
+                  ImagePart(:final name) =>
+                    VaultImage(key: ValueKey('image:$i:$name'), book: book, name: name, folder: note?.folder ?? '', size: part.size),
                   AudioPart(:final name) => RecordingAudio(
                       key: ValueKey('audio:$name'),
                       playback: _playback(name, note?.folder),

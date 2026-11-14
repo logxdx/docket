@@ -48,6 +48,16 @@ class NoteMarkdown extends StatelessWidget {
       style: theme.textTheme.bodyLarge,
       imageBuilder: safeMarkdownImage,
       useDollarSignsForLatex: true,
+      // Tables in the app's own colours (the default header is light on light in the dark themes).
+      styleSheet: GptMarkdownStyleSheet(
+        table: TableStyle(
+          borderColor: theme.colorScheme.outlineVariant,
+          borderRadius: const Radius.circular(8),
+          headerBackground: theme.colorScheme.surfaceContainerHighest,
+          headerTextStyle: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600, color: theme.colorScheme.onSurface),
+          cellPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        ),
+      ),
       inlinePatterns: [
         // ==highlight==
         InlinePattern(
@@ -84,6 +94,13 @@ class CalloutBox extends StatefulWidget {
 
 class _CalloutBoxState extends State<CalloutBox> {
   late bool _open = widget.fold != '-';
+
+  @override
+  void didUpdateWidget(CalloutBox old) {
+    super.didUpdateWidget(old);
+    // Another callout in this place: its own folding.
+    if (old.fold != widget.fold || old.title != widget.title || old.type != widget.type) _open = widget.fold != '-';
+  }
 
   static (IconData, Color) look(CalloutKind kind) => switch (kind) {
         CalloutKind.note => (Icons.edit_note_rounded, const Color(0xFF448AFF)),
