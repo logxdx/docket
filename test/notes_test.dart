@@ -9,7 +9,7 @@ void main() {
     const text = '---\ntags: x\n---\n# Heading\nSee [[Project X|the project]] and [[Daily/2026-10-24#Plans]].\n'
         'Ideas #idea #work/q4, not #1 or `#code`.\n```\n[[fenced]] #fenced\n```';
     expect(parseLinks(text), ['Project X', 'Daily/2026-10-24']);
-    expect(parseTags(text), {'idea', 'work/q4'});
+    expect(parseTags(text), {'x', 'idea', 'work/q4'});
     expect(fileName('What: a/b?'), 'What a b');
     expect(applyTemplate('# {{title}} on {{date}} {{time}}', title: 'T', now: DateTime(2026, 10, 24, 9, 5)),
         '# T on 2026-10-24 09:05');
@@ -60,6 +60,16 @@ void main() {
       await book.delete(renamed);
       expect(book.byTitle('Project Y'), isNull);
       expect(File('${dir.path}/Project Y.md').existsSync(), isFalse);
+    });
+
+    test('a title property follows a rename; one the user set apart stays', () async {
+      final a = await book.create('Budget', text: '---\ntitle: Budget\ntags:\n  - finance\n---\nText');
+      final moved = await book.rename(a, 'Budget: Q4');
+      expect(moved.path, 'Budget Q4.md');
+      expect(File('${dir.path}/Budget Q4.md').readAsStringSync(), '---\ntitle: Budget Q4\ntags:\n  - finance\n---\nText');
+      expect(book.tags(), [('finance', 1)]);
+      final b = await book.create('Plans', text: '---\ntitle: My plans for 2027\n---\nText');
+      expect((await book.rename(b, 'Plans 2027')).text, b.text);
     });
 
     test('templates and daily notes', () async {

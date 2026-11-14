@@ -52,6 +52,12 @@ app.*.map.json
 .models-bundle/
 integration_test/speech_fixture.dart
 
+# Align and Title, built from source by tool/build_desert_ant.sh (its checkout is in .build/)
+/android/app/libs/
+
+# Worktrees
+.claude/
+
 # The Desert Ant SDK checkout (its changes are kept as patches in third_party/desert-ant-core-patches),
 # the Title engine's working copy, and local backups
 third_party/desert-ant-core/

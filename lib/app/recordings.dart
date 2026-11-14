@@ -25,6 +25,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/notes/enrich.dart';
 import '../core/notes/notebook.dart';
+import '../core/notes/properties.dart';
 import '../core/voice/recording.dart';
 import '../core/voice/spoken.dart';
 import '../core/voice/summaries.dart';
@@ -333,28 +334,29 @@ class Recordings extends ChangeNotifier {
     }
   }
 
-  /// Title (the model's, or the note's first words) and Gist's topics.
+  /// The note's properties: Gist's topics as its tags, then Title's title (else the note's first words) and
+  /// description. The title also names the note and its heading.
   Future<void> _name(String id, String transcript) async {
     final prose = proseOf(transcript);
     final topics = enabled('tags') ? await ant.topics(prose) : const <({String slug, String name, double score})>[];
     final tags = [for (final t in topics) topicTag(t.slug)];
-    // The topics join the note's "#recording" on its length line.
-    await _edit(id, (text) {
-      final missing = [for (final t in tags) if (!text.contains('#$t')) '#$t'];
-      return missing.isEmpty ? text : text.replaceFirst(' · #recording', ' · #recording ${missing.join(' ')}');
-    });
+    if (tags.isNotEmpty) await _edit(id, (text) => withProperties(text, tags: tags));
     if (!enabled('title')) return;
     final card = await ant.title(prose);
-    final title = (card?.title.isNotEmpty == true ? card!.title : heuristicTitle(prose)).trim();
     final note = _holdingId(id);
-    if (note == null || title.isEmpty || !isPlaceholderTitle(note.title)) return;
+    if (note == null) return;
+    // Named by the user meanwhile: their name stays; the description still goes in.
+    final title = isPlaceholderTitle(note.title)
+        ? (card?.title.isNotEmpty == true ? card!.title : heuristicTitle(prose)).trim()
+        : '';
     final description = card?.description ?? '';
     await _edit(id, (text) {
-      final t = withHeading(text, note.title, title);
-      if (description.isEmpty || t.contains('# $title\n\n$description')) return t;
-      // The one-line description under the title.
-      return t.replaceFirst(RegExp('^# ${RegExp.escape(title)}\$', multiLine: true), '# $title\n\n$description');
+      final t = withProperties(text,
+          title: title.isNotEmpty ? title : (hasProperty(text, 'title') ? null : note.title),
+          description: description.isNotEmpty && !hasProperty(text, 'description') ? description : null);
+      return title.isEmpty ? t : withHeading(t, note.title, title);
     });
+    if (title.isEmpty) return;
     final fresh = notebook.byPath(note.path);
     if (fresh == null) return;
     final moved = await notebook.rename(fresh, title);

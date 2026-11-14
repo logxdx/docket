@@ -39,14 +39,19 @@ flutter build apk --debug
      beside the audio (`<audio>.words.json`). Playing the audio lights up
      each word as it is said, even after the text was edited
      (`timesFor`), and tapping a word plays from there;
-  5. a new note gets its **title** and **topic tags** (Gist).
+  5. a new note gets its **properties** (YAML front matter, as Obsidian
+     keeps them): a `title` and a `description` (**Title**) and topic
+     `tags` (**Gist**).
   Saving is instant; a recording interrupted by the app closing carries on
   at the next start. With a model server set, a summary is written too.
 - **Typed notes**, as they are saved (`lib/app/enricher.dart`): an emoji on
   each task and each timed entry of a daily note (**Emo**: "- [ ] 🦷
-  Dentist"), topic tags for a note with none (**Gist**), and a title for one
-  still called "Untitled" (**Title**, else its first words). Each can be
-  turned off in Settings › On this phone.
+  Dentist"), and front matter (`lib/core/notes/properties.dart`): topic
+  `tags` for a note with none (**Gist**), a `description` for one without
+  (**Title**, from 12 words on; delete it to have it written again, empty it
+  to keep none), and a `title` for one still called "Untitled" (**Title**,
+  else its first words), which renames it. Each can be turned off in
+  Settings › On this phone.
 - **AI** (`lib/core/ai/model.dart`): Summarise, Tidy up and recordings'
   summaries, from any server with the OpenAI-compatible chat API (llama-server
   or Ollama on the phone or a computer, or a cloud provider), set in Settings.
@@ -62,21 +67,23 @@ the app's folder (`OfflineModels.kt`) and each SDK is pointed at its folder,
 which it then uses with no network.
 
 That costs space: 1.73 GB of models (Voz alone is 1.24 GB), copied once, and
-each model's native library is about 56 MB. Build per ABI for a phone:
-`flutter build apk --release --split-per-abi --target-platform android-arm64`
-(about 2.2 GB).
+each model's native library is about 56 MB. Docket is built for arm64-v8a
+phones only (no x86_64, so no emulator):
+`flutter build apk --release --split-per-abi --target-platform android-arm64`.
 
 The SDKs report an anonymous usage count to Desert Ant when a network
 happens to exist (their licence counts monthly devices); nothing of the
 notes or the audio is ever sent. `INTERNET` stays for that and the optional
 model server.
 
-**Align and Title for Android** were Apple-only in Desert Ant's SDK. They are
-ported in `third_party/desert-ant-core` (a fork at v4.3.0: branches
-`android-align`, `android-title`), built with the repo's own Android
-cross-compile into `android/app/libs/*.aar`, going through the same native
-licence path as the other models. Without those AARs the app uses Voz's own
-word times and titles from the note's first words.
+**Align and Title for Android** were Apple-only in Desert Ant's SDK. Docket
+ports them as patches on Desert Ant's v4.3.0 source
+(`third_party/desert-ant-core-patches/0001`, `0002`), going through the same
+native licence path as the other models. `tool/build_desert_ant.sh` clones
+that source into `.build/`, applies the patches and runs Desert Ant's own
+Android cross-compile (mise; it fetches Swift 6.4.1 and NDK r30 the first
+time) into `android/app/libs/*.aar`, which git does not keep. `tool/ci.sh`
+and `tool/release.sh` run it; it rebuilds only when the patches change.
 
 **Phonon**, also on the phone and offline:
 - *Speech recognition*: Fermion Research's Phonon-2.5 (25 languages) and

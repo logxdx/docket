@@ -19,10 +19,12 @@ android {
         applicationId = "app.notesapp.notes_app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        // Desert Ant's Android SDK needs API 24; its native libraries exist for these two ABIs.
+        // Desert Ant's Android SDK needs API 24.
         minSdk = maxOf(24, flutter.minSdkVersion)
-        // A universal APK only: --split-per-abi sets its own ABI splits, which may not be combined with these.
-        if (!project.hasProperty("split-per-abi")) ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        // Phones only: arm64-v8a. Phonon, Align and Title are built for nothing else, and an x86_64 copy of
+        // every library would only serve emulators. A universal APK only: --split-per-abi sets its own ABI
+        // splits, which may not be combined with these (the packaging rule below covers both).
+        if (!project.hasProperty("split-per-abi")) ndk { abiFilters += listOf("arm64-v8a") }
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
@@ -64,6 +66,24 @@ android {
     }
 }
 
+android {
+    // Whatever a dependency carries for other ABIs (Desert Ant's and LiteRT's x86_64 libraries) stays out.
+    packaging { jniLibs { excludes += listOf("lib/x86_64/**", "lib/x86/**", "lib/armeabi-v7a/**") } }
+}
+
+// Align and Title are built, not kept in git: say how, rather than fail on Kotlin's unresolved imports.
+val desertAntLibs = file("libs")
+val checkDesertAntLibs by tasks.registering {
+    doFirst {
+        for (model in listOf("align", "title")) {
+            if (!desertAntLibs.resolve("$model-release.aar").isFile) {
+                throw GradleException("android/app/libs/$model-release.aar is missing: run tool/build_desert_ant.sh")
+            }
+        }
+    }
+}
+tasks.named("preBuild") { dependsOn(checkDesertAntLibs) }
+
 kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
@@ -84,7 +104,8 @@ dependencies {
     implementation("ai.desertant:who:$desertAnt")
     implementation("ai.desertant:gist:$desertAnt")
     implementation("ai.desertant:emo:$desertAnt")
-    // Align and Title for Android, built from third_party/desert-ant-core when present.
+    // Align and Title for Android: built from Desert Ant's source and Docket's patches by
+    // tool/build_desert_ant.sh (tool/ci.sh and tool/release.sh run it), not kept in git.
     implementation(fileTree("libs") { include("*.aar") })
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation("junit:junit:4.13.2")

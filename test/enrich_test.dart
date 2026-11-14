@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:notes_app/core/notes/enrich.dart';
 import 'package:notes_app/core/notes/notebook.dart' show parseTags;
+import 'package:notes_app/core/notes/properties.dart';
 
 void main() {
   test('placeholder titles are the app\'s, others the user\'s', () {
@@ -12,12 +13,50 @@ void main() {
     expect(isPlaceholderTitle('Recording studio budget'), isFalse);
   });
 
-  group('topic tags', () {
-    test('a "#a #b" line at the end, those already there left out', () {
-      expect(withTagLine('# Budget\n\nText\n\n', ['finance', 'business'], const {}), '# Budget\n\nText\n\n#finance #business\n');
-      expect(withTagLine('Text #finance', ['finance', 'business'], parseTags('Text #finance')), 'Text #finance\n\n#business\n');
-      expect(withTagLine('Text', ['finance'], {'finance'}), 'Text');
-      expect(parseTags(withTagLine('Text', ['personal-finance'], const {})), {'personal-finance'});
+  group('properties (front matter)', () {
+    test('made when missing, in Obsidian\'s shape, the body untouched', () {
+      final t = withProperties('# Budget\n\nText\n',
+          title: 'Budget: Q4 review', description: 'Spend fell 8% in Q4.', tags: ['finance', 'business']);
+      expect(t, '---\ntitle: "Budget: Q4 review"\ndescription: Spend fell 8% in Q4.\ntags:\n  - finance\n  - business\n---\n'
+          '# Budget\n\nText\n');
+      expect(propertyText(t, 'title'), 'Budget: Q4 review');
+      expect(propertyText(t, 'description'), 'Spend fell 8% in Q4.');
+      expect(propertyTags(t), ['finance', 'business']);
+      expect(parseTags(t), {'finance', 'business'});
+      expect(bodyOf(t), '# Budget\n\nText\n');
+    });
+
+    test('the user\'s own keys and lines kept; tags merged, none twice', () {
+      const note = '---\naliases: [Q4]\ntags: [Finance, "#home"]\ncreated: 2026-11-14 # by hand\n---\nText';
+      final t = withProperties(note, description: 'New.', tags: ['finance', 'business']);
+      expect(t, '---\naliases: [Q4]\ndescription: New.\ntags:\n  - Finance\n  - home\n  - business\n'
+          'created: 2026-11-14 # by hand\n---\nText');
+      expect(withProperties(note, tags: ['finance']), note);
+      expect(propertyText(note, 'created'), '2026-11-14');
+    });
+
+    test('a "- a" list, a key with no value, and a description replaced', () {
+      const note = '---\ntitle: Old\ndescription:\ntags:\n- a\n- b\n---\n';
+      expect(hasProperty(note, 'description'), isTrue);
+      expect(propertyText(note, 'description'), '');
+      expect(propertyTags(note), ['a', 'b']);
+      expect(withProperties(note, description: 'It is "new".'),
+          '---\ntitle: Old\ndescription: It is "new".\ntags:\n- a\n- b\n---\n');
+      expect(propertyText(withProperties(note, description: '"Quoted" here'), 'description'), '"Quoted" here');
+    });
+
+    test('values YAML would misread are quoted', () {
+      expect(yamlScalar('Plain words, fine'), 'Plain words, fine');
+      for (final v in ['yes', '12', '2026-11-14', '- a', 'a: b', '#tag', 'a #b', ' x', '[x]', 'C:']) {
+        expect(yamlScalar(v), startsWith('"'), reason: v);
+      }
+      expect(yamlScalar('two\nlines'), 'two lines');
+    });
+
+    test('no front matter, nothing read', () {
+      expect(hasProperties('# A\n---\nb'), isFalse);
+      expect(propertyTags('Text'), isEmpty);
+      expect(withProperties('Text'), 'Text');
     });
 
     test('topic names as tags', () {

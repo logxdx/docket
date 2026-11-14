@@ -19,6 +19,7 @@ import '../../core/notes/enrich.dart';
 import '../../core/notes/format.dart';
 import '../../core/notes/journal.dart';
 import '../../core/notes/notebook.dart';
+import '../../core/notes/properties.dart';
 import '../../core/voice/recording.dart';
 import '../../core/voice/spoken.dart';
 import '../../core/voice/summaries.dart';
@@ -581,8 +582,9 @@ class _NoteScreenState extends State<NoteScreen> {
             ])
           : ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 32), children: [
               if (journal != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: journal),
+              if (hasProperties(_text.text)) _Properties(text: _text.text),
               // Task links are numbered over the whole note, before it is cut into parts.
-              for (final part in noteParts(taskLinks(_text.text, taskScheme).replaceFirst(RegExp(r'^---\n[\s\S]*?\n---\n'), '')))
+              for (final part in noteParts(withoutProperties(taskLinks(_text.text, taskScheme))))
                 switch (part) {
                   MarkdownPart(:final text) => SelectionArea(
                       child: GptMarkdown(
@@ -784,6 +786,45 @@ class _Toolbar extends StatelessWidget {
 }
 
 /// A pill to tap: a suggested note to link, or a journaling prompt.
+/// A note's properties as the reading view shows them: its description, then
+/// its front-matter tags. The rest (the title is the note's name) stays in the
+/// text, for the editor.
+class _Properties extends StatelessWidget {
+  const _Properties({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final description = propertyText(text, 'description') ?? '';
+    final tags = propertyTags(text);
+    if (description.isEmpty && tags.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (description.isNotEmpty)
+          SelectableText(description,
+              style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.45)),
+        if (description.isNotEmpty && tags.isNotEmpty) const SizedBox(height: 10),
+        if (tags.isNotEmpty)
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            for (final t in tags)
+              Semantics(
+                label: 'Tag $t',
+                excludeSemantics: true,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: ShapeDecoration(color: theme.colorScheme.surfaceContainerHigh, shape: const StadiumBorder()),
+                  child: Text('#$t', style: theme.textTheme.labelMedium?.copyWith(color: Accent.of(context))),
+                ),
+              ),
+          ]),
+      ]),
+    );
+  }
+}
+
 class _PillChip extends StatelessWidget {
   const _PillChip({required this.icon, required this.label, required this.onPressed});
 

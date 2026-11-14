@@ -10,6 +10,7 @@ import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 
+import 'properties.dart';
 import 'vault.dart';
 
 class Note {
@@ -68,15 +69,17 @@ final _fence = RegExp(r'```[\s\S]*?```|`[^`\n]*`');
 List<String> parseLinks(String text) =>
     [for (final m in _link.allMatches(text.replaceAll(_fence, ''))) m[1]!.trim()];
 
-/// #tags outside code, headings excluded ("# Title" is not a tag; "#idea" is).
+/// #tags outside code, headings excluded ("# Title" is not a tag; "#idea" is),
+/// and the front matter's `tags:`, as Obsidian has them.
 Set<String> parseTags(String text) => {
+      for (final t in propertyTags(text)) t.toLowerCase(),
       for (final m in RegExp(r'(?:^|[\s(,])#([\p{L}\p{N}_/-]*[\p{L}_/-][\p{L}\p{N}_/-]*)', unicode: true)
           .allMatches(_body(text).replaceAll(_fence, '')))
         m[1]!.toLowerCase(),
     };
 
 /// [text] without YAML front matter.
-String _body(String text) => text.replaceFirst(RegExp(r'^---\n[\s\S]*?\n---\n'), '');
+String _body(String text) => withoutProperties(text);
 
 /// [template] for a new note: {{date}}, {{time}}, {{title}} filled in.
 String applyTemplate(String template, {required String title, required DateTime now}) => template
@@ -243,8 +246,10 @@ class Notebook extends ChangeNotifier {
     if (_notes.containsKey(path)) throw StateError('A note called "$name" already exists');
     final file = await vault.move(note.file, path);
     _notes.remove(note.path);
-    final moved = Note(file: file, text: note.text);
+    var moved = Note(file: file, text: note.text);
     _notes[path] = moved;
+    // A `title:` property that was the old name follows the new one.
+    if (propertyText(note.text, 'title') == note.title) moved = await save(path, withProperties(note.text, title: name));
     // Keep [[Old title]] links working, aliases and headings intact.
     final old = RegExp(r'\[\[' + RegExp.escape(note.title) + r'((?:#[^\[\]|\n]*)?(?:\|[^\[\]\n]*)?)\]\]', caseSensitive: false);
     for (final other in [..._notes.values]) {

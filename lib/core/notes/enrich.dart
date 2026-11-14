@@ -3,28 +3,21 @@
 ///
 /// - a title, for a note still under a placeholder name ("Untitled",
 ///   "Recording 2026-11-14 0905"), never over a name the user gave;
-/// - topic tags, as the note's own #tags, for a note that has none yet;
+/// - a description, from the same model, in the note's front matter;
+/// - topic tags, in the front matter's `tags:`, for a note that has none yet;
 /// - an emoji at the start of a task ("- [ ] 🦷 Dentist appointment") and of
 ///   a timed entry on a daily note, the calendar ("- 14:00 🏋️ Gym").
 library;
+
+import 'properties.dart';
 
 /// Whether [title] is a name the app gave, not the user.
 bool isPlaceholderTitle(String title) => RegExp(
       r'^(?:Untitled(?: \d+)?|Note \d{4}-\d{2}-\d{2}[ \d.]*|Recording \d{4}-\d{2}-\d{2} \d{4}(?: \d+)?)$',
     ).hasMatch(title.trim());
 
-final _frontMatter = RegExp(r'^---\n([\s\S]*?)\n---\n');
-
 /// [text] without its YAML front matter.
-String bodyOf(String text) => text.replaceFirst(_frontMatter, '');
-
-/// [text] with [tags] at its end as one "#a #b" line, the app's tags being
-/// inline #tags; those already in the note are left out.
-String withTagLine(String text, List<String> tags, Set<String> existing) {
-  final fresh = [for (final t in tags) if (!existing.contains(t.toLowerCase())) t];
-  if (fresh.isEmpty) return text;
-  return '${text.trimRight()}\n\n${fresh.map((t) => '#$t').join(' ')}\n';
-}
+String bodyOf(String text) => withoutProperties(text);
 
 /// A topic as a tag: "Personal Finance" or "personal_finance" -> "personal-finance".
 String topicTag(String slug) =>

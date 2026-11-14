@@ -24,6 +24,9 @@ printf '== models\n'
 python3 -I tool/fetch_models.py
 python3 -I tool/stage_models.py
 
+printf '\n== Align and Title\n'
+tool/build_desert_ant.sh
+
 printf '\n== APK %s (%s)\n' "$name" "$number"
 flutter build apk --release --split-per-abi --target-platform android-arm64 \
   --build-name "$name" --build-number "$number"

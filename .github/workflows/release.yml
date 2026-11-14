@@ -33,6 +33,19 @@ jobs:
           flutter-version: 3.47.7
           channel: stable
           cache: true
+      # Align and Title from source (tool/build_desert_ant.sh): mise runs Desert Ant's build, which fetches its
+      # Swift toolchain, Swift Android SDK and NDK once; all cached until the patches change.
+      - uses: jdx/mise-action@v2
+        with:
+          install: false
+      - uses: actions/cache@v4
+        with:
+          path: |
+            android/app/libs
+            .build/desert-ant-core
+            ~/.cache/desert-ant
+            ~/.swiftpm
+          key: desert-ant-${{ hashFiles('third_party/desert-ant-core-patches/000*.patch', 'tool/build_desert_ant.sh') }}
       - name: Signing key
         if: env.KEYSTORE_B64 != ''
         run: |
