@@ -29,7 +29,11 @@ flutter build apk --release --split-per-abi --target-platform android-arm64 \
   --build-name "$name" --build-number "$number"
 apk=build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
 # A release once shipped without the app's code: never again.
-unzip -l "$apk" | grep -q 'lib/arm64-v8a/libapp.so' || { echo "the APK has no libapp.so" >&2; exit 1; }
+# (The whole listing is read before matching: `grep -q` would stop early, and under pipefail the cut-off
+# unzip would fail the check on a good APK.)
+listing=$(unzip -Z1 "$apk")
+grep -qx 'lib/arm64-v8a/libapp.so' <<<"$listing" || { echo "the APK has no libapp.so" >&2; exit 1; }
+grep -qx 'assets/models/manifest.json' <<<"$listing" || { echo "the APK has no models" >&2; exit 1; }
 size=$(stat -c %s "$apk")
 [ "$size" -lt $((2 * 1024 * 1024 * 1024)) ] || { echo "the APK is over GitHub's 2 GiB limit ($size bytes)" >&2; exit 1; }
 
@@ -38,7 +42,17 @@ cp "$apk" "$out/docket-$version-arm64.apk"
 
 printf '\n== Voz pack\n'
 voz_rev=$(python3 -I -c "import json; print(json.load(open('.models/models/manifest.json'))['models']['voz']['revision'])")
-(cd .models/models/voz && zip -0 -q -X "../../../$out/docket-voz-$voz_rev.zip" -- *)
+# Stored, not compressed (the weights do not compress), with Python's zipfile: no zip tool needed.
+python3 -I - "$out/docket-voz-$voz_rev.zip" .models/models/voz <<'PY'
+import os, sys, zipfile
+target, folder = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(target, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
+    for name in sorted(os.listdir(folder)):
+        path = os.path.join(folder, name)
+        if os.path.isfile(path) and not name.startswith("."):
+            z.write(path, name)
+print(f"{target}: {os.path.getsize(target) / 1e6:.0f} MB")
+PY
 
 (cd "$out" && sha256sum -- * > SHA256SUMS)
 ls -la "$out"
