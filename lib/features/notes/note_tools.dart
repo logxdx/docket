@@ -296,6 +296,51 @@ class TagsScreen extends StatelessWidget {
   }
 }
 
+/// Obsidian's All properties view: every property the notes use, with how many use it and its kind. Tapping
+/// one gives back a search for the notes that have it ("[status]").
+class PropertiesScreen extends StatelessWidget {
+  const PropertiesScreen({super.key, required this.book});
+
+  final Notebook book;
+
+  static IconData iconOf(String kind) => switch (kind) {
+        'list' => Icons.format_list_bulleted_rounded,
+        'checkbox' => Icons.check_box_outlined,
+        'number' => Icons.numbers_rounded,
+        'date' => Icons.calendar_today_outlined,
+        'datetime' => Icons.schedule_rounded,
+        _ => Icons.short_text_rounded,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final counts = <String, int>{};
+    final kinds = <String, String>{};
+    for (final n in book.notes) {
+      for (final k in propertyKeys(n.text)) {
+        counts[k] = (counts[k] ?? 0) + 1;
+        kinds.putIfAbsent(k, () => propertyKind(n.text, k));
+      }
+    }
+    final sorted = counts.keys.toList()..sort((a, b) => counts[b]!.compareTo(counts[a]!) != 0 ? counts[b]!.compareTo(counts[a]!) : a.compareTo(b));
+    return Scaffold(
+      appBar: AppBar(title: const Text('All properties')),
+      body: sorted.isEmpty
+          ? Center(child: Text('No note has properties yet.', style: TextStyle(color: theme.colorScheme.outline)))
+          : ListView(padding: const EdgeInsets.symmetric(vertical: 8), children: [
+              for (final k in sorted)
+                ListTile(
+                  leading: Icon(iconOf(kinds[k]!), color: Accent.of(context)),
+                  title: Text(k),
+                  trailing: Text('${counts[k]}', style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                  onTap: () => Navigator.pop(context, '[$k]'),
+                ),
+            ]),
+    );
+  }
+}
+
 /// A slash command: what it is called, and the text it puts in place of "/command" ([cursor]: where the cursor
 /// goes within it, from its start; null: at its end).
 typedef SlashCommand = ({String name, IconData icon, String Function(DateTime now) text, int? cursor});

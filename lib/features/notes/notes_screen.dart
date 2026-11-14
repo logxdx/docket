@@ -264,6 +264,12 @@ class _NotesScreenState extends State<NotesScreen> {
         }
       case 'canvas' || 'base':
         await _newFile(choice);
+      case 'properties':
+        final search = await Navigator.push<String>(context, MaterialPageRoute(builder: (_) => PropertiesScreen(book: _book)));
+        if (search != null) {
+          _query.text = search;
+          _selected.clear();
+        }
       case 'unique':
         final note = await _book.createUnique(folder: _flat ? '' : _folder);
         if (mounted) await _open(note, edit: true);
@@ -357,6 +363,7 @@ class _NotesScreenState extends State<NotesScreen> {
       Command('Random note', Icons.casino_outlined, () => _menu('random')),
       Command('Show bookmarks', Icons.bookmarks_outlined, () => _menu('view-bookmarks')),
       Command('Tags', Icons.tag_rounded, () => _menu('tags')),
+      Command('All properties', Icons.tune_rounded, () => _menu('properties')),
       Command('Show folders', Icons.folder_outlined, () => _menu('view-folders')),
       Command('Show all notes', Icons.notes_rounded, () => _menu('view-all')),
       Command('Sort by name', Icons.sort_by_alpha_rounded, () => _menu('sort-name')),
@@ -508,6 +515,7 @@ class _NotesScreenState extends State<NotesScreen> {
             if (!readOnly) const PopupMenuItem(value: 'base', child: ListTile(leading: Icon(Icons.table_chart_outlined), title: Text('New base'))),
             const PopupMenuItem(value: 'random', child: ListTile(leading: Icon(Icons.casino_outlined), title: Text('Random note'))),
             const PopupMenuItem(value: 'tags', child: ListTile(leading: Icon(Icons.tag_rounded), title: Text('Tags'))),
+            const PopupMenuItem(value: 'properties', child: ListTile(leading: Icon(Icons.tune_rounded), title: Text('All properties'))),
             const PopupMenuDivider(),
             CheckedPopupMenuItem(value: 'view-folders', checked: _view == 'folders', child: const Text('Folders')),
             CheckedPopupMenuItem(value: 'view-all', checked: _view == 'all', child: const Text('All notes')),
