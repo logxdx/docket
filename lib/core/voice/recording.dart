@@ -272,6 +272,8 @@ List<NotePart> noteParts(String text) {
       }
       parts.add(TranscriptPart(body.join('\n').trim()));
     } else {
+      // A heading starts a part of its own, so the outline and [[Note#Heading]] links can scroll to it.
+      if (RegExp(r'^#{1,6}\s').hasMatch(line)) flush();
       markdown.add(line);
     }
   }

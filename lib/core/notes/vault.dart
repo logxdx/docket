@@ -29,7 +29,7 @@ abstract class Vault {
   Future<String> read(VaultFile file);
 
   /// Create or overwrite [path] (folders made as needed).
-  Future<VaultFile> write(String path, String text);
+  Future<VaultFile> write(String path, String text, {String mime = 'text/markdown'});
   Future<void> delete(VaultFile file);
   Future<VaultFile> move(VaultFile file, String path);
 
@@ -118,7 +118,7 @@ class LocalVault implements Vault {
   Future<String> read(VaultFile file) => File(file.uri).readAsString();
 
   @override
-  Future<VaultFile> write(String path, String text) async {
+  Future<VaultFile> write(String path, String text, {String mime = 'text/markdown'}) async {
     final file = _file(path);
     await file.parent.create(recursive: true);
     await file.writeAsString(text);
@@ -233,7 +233,7 @@ class ReadOnlyVault implements Vault {
   Future<String> read(VaultFile file) => inner.read(file);
 
   @override
-  Future<VaultFile> write(String path, String text) async => throw const ReadOnlyNotes();
+  Future<VaultFile> write(String path, String text, {String mime = 'text/markdown'}) async => throw const ReadOnlyNotes();
 
   @override
   Future<void> delete(VaultFile file) async => throw const ReadOnlyNotes();

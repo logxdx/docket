@@ -10,9 +10,11 @@ import 'package:flutter/material.dart';
 import '../../app/services.dart';
 import '../../app/theme.dart';
 import '../../core/notes/notebook.dart';
+import '../../core/notes/search.dart';
 import '../settings/settings_screen.dart';
 import '../settings/settings_tiles.dart';
 import 'graph_screen.dart';
+import 'navigation.dart';
 import 'note_screen.dart';
 import 'record_screen.dart';
 import 'trash_screen.dart';
@@ -38,7 +40,7 @@ class _NotesScreenState extends State<NotesScreen> {
   late final Services _s = ServicesScope.of(context);
   Notebook get _book => _s.notebook;
 
-  /// 'folders' (the default) or 'all'.
+  /// 'folders' (the default), 'all' or 'bookmarks'.
   String get _view => _s.settings.get('notes.view') ?? 'folders';
 
   /// 'modified' (the default) or 'name'.
@@ -46,8 +48,8 @@ class _NotesScreenState extends State<NotesScreen> {
 
   bool get _selecting => _selected.isNotEmpty;
 
-  /// Searching, filtering by tag, or the All notes view: one flat list of the whole vault.
-  bool get _flat => _query.text.trim().isNotEmpty || _tag != null || _view == 'all';
+  /// Searching, filtering by tag, or the All notes or Bookmarks view: one flat list.
+  bool get _flat => _query.text.trim().isNotEmpty || _tag != null || _view != 'folders';
 
   @override
   void didChangeDependencies() {
@@ -242,8 +244,14 @@ class _NotesScreenState extends State<NotesScreen> {
         await _newFolder();
       case 'sort-name' || 'sort-modified':
         _s.settings.set('notes.sort', choice.substring(5));
-      case 'view-all' || 'view-folders':
+      case 'view-all' || 'view-folders' || 'view-bookmarks':
         _s.settings.set('notes.view', choice.substring(5));
+      case 'switcher':
+        await _switcher();
+      case 'commands':
+        await _palette();
+      case 'random':
+        if (_book.random() case final n?) await _open(n);
       case 'graph':
         await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const GraphScreen()));
       case 'vault':
@@ -252,6 +260,40 @@ class _NotesScreenState extends State<NotesScreen> {
         await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const TrashScreen()));
     }
     if (mounted) setState(() {});
+  }
+
+  Future<void> _switcher() async {
+    final note = await showQuickSwitcher(context, book: _book, recent: _s.recent);
+    if (note != null && mounted) await _open(note);
+  }
+
+  /// Every action on the notes, by name.
+  Future<void> _palette() async {
+    final readOnly = _book.readOnly;
+    await showCommandPalette(context, [
+      Command('Open a note…', Icons.search_rounded, _switcher),
+      if (!readOnly) ...[
+        Command('New note', Icons.note_add_outlined, _new),
+        Command('New folder', Icons.create_new_folder_outlined, _newFolder),
+        Command("Today's note", Icons.today_rounded, () async {
+          final note = await _book.daily();
+          if (mounted) await _open(note, edit: true);
+        }),
+        Command('Record and transcribe', Icons.mic_none_rounded,
+            () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const RecordScreen()))),
+      ],
+      Command('Random note', Icons.casino_outlined, () => _menu('random')),
+      Command('Show bookmarks', Icons.bookmarks_outlined, () => _menu('view-bookmarks')),
+      Command('Show folders', Icons.folder_outlined, () => _menu('view-folders')),
+      Command('Show all notes', Icons.notes_rounded, () => _menu('view-all')),
+      Command('Sort by name', Icons.sort_by_alpha_rounded, () => _menu('sort-name')),
+      Command('Sort by recently changed', Icons.schedule_rounded, () => _menu('sort-modified')),
+      Command('Graph of links', Icons.hub_outlined, () => _menu('graph')),
+      if (!readOnly) Command('Trash', Icons.delete_outline_rounded, () => _menu('trash')),
+      Command('Where notes are kept', Icons.folder_special_outlined, () => _menu('vault')),
+      Command('Settings', Icons.settings_outlined,
+          () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const SettingsScreen()))),
+    ]);
   }
 
   Future<void> _vault() async {
@@ -386,10 +428,14 @@ class _NotesScreenState extends State<NotesScreen> {
           tooltip: 'More',
           onSelected: _menu,
           itemBuilder: (context) => [
+            const PopupMenuItem(value: 'switcher', child: ListTile(leading: Icon(Icons.search_rounded), title: Text('Open a note…'))),
+            const PopupMenuItem(value: 'commands', child: ListTile(leading: Icon(Icons.terminal_rounded), title: Text('Command palette'))),
             if (!readOnly) const PopupMenuItem(value: 'folder', child: ListTile(leading: Icon(Icons.create_new_folder_outlined), title: Text('New folder'))),
+            const PopupMenuItem(value: 'random', child: ListTile(leading: Icon(Icons.casino_outlined), title: Text('Random note'))),
             const PopupMenuDivider(),
             CheckedPopupMenuItem(value: 'view-folders', checked: _view == 'folders', child: const Text('Folders')),
             CheckedPopupMenuItem(value: 'view-all', checked: _view == 'all', child: const Text('All notes')),
+            CheckedPopupMenuItem(value: 'view-bookmarks', checked: _view == 'bookmarks', child: const Text('Bookmarks')),
             const PopupMenuDivider(),
             CheckedPopupMenuItem(value: 'sort-modified', checked: _sort == 'modified', child: const Text('Recently changed first')),
             CheckedPopupMenuItem(value: 'sort-name', checked: _sort == 'name', child: const Text('By name')),
@@ -420,11 +466,12 @@ class _NotesScreenState extends State<NotesScreen> {
         if (_folder.isNotEmpty && !_book.folders.contains(_folder)) _folder = '';
         final List<String> folders;
         final List<Note> notes;
+        final searching = _query.text.trim().isNotEmpty;
         if (_flat) {
           folders = const [];
-          var found = _book.search(_query.text);
+          var found = _view == 'bookmarks' && !searching ? _book.bookmarked : _book.search(_query.text);
           if (_tag != null) found = [for (final n in found) if (n.tags.contains(_tag)) n];
-          notes = _query.text.trim().isEmpty ? _sorted(found) : found;
+          notes = searching || _view == 'bookmarks' ? found : _sorted(found);
         } else {
           folders = _book.subfolders(_folder);
           notes = _sorted(_book.notesIn(_folder));
@@ -434,6 +481,7 @@ class _NotesScreenState extends State<NotesScreen> {
           for (final n in notes) (folder: false, path: n.path),
         ];
         final tags = _book.tags();
+        final query = searching ? SearchQuery.parse(_query.text) : null;
         return PopScope(
           canPop: !_selecting && (_flat || _folder.isEmpty),
           onPopInvokedWithResult: (popped, _) {
@@ -514,7 +562,9 @@ class _NotesScreenState extends State<NotesScreen> {
                                 ? readOnly
                                     ? 'No Markdown notes in this folder.'
                                     : 'No notes yet. Write one, open today\'s note, or record one.'
-                                : _flat
+                                : _view == 'bookmarks' && !searching && _tag == null
+                                    ? 'No bookmarks yet: bookmark a note from its menu.'
+                                    : _flat
                                     ? 'Nothing matches.'
                                     : 'This folder is empty.',
                             textAlign: TextAlign.center,
@@ -554,6 +604,7 @@ class _NotesScreenState extends State<NotesScreen> {
                                 )
                               : _NoteCard(
                                   note: _book.byPath(item.path)!,
+                                  snippet: query?.snippet(_book.byPath(item.path)!),
                                   showFolder: _flat,
                                   selected: selected,
                                   selecting: _selecting,
@@ -678,6 +729,7 @@ class _FolderCard extends StatelessWidget {
 class _NoteCard extends StatelessWidget {
   const _NoteCard({
     required this.note,
+    this.snippet,
     required this.showFolder,
     required this.selected,
     required this.selecting,
@@ -686,6 +738,9 @@ class _NoteCard extends StatelessWidget {
   });
 
   final Note note;
+
+  /// The line that matched a search, shown in place of the note's first line.
+  final String? snippet;
   final bool showFolder;
   final bool selected;
   final bool selecting;
@@ -711,9 +766,9 @@ class _NoteCard extends StatelessWidget {
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(note.title,
                         maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w500)),
-                    if (note.preview.isNotEmpty) ...[
+                    if ((snippet ?? note.preview).isNotEmpty) ...[
                       const SizedBox(height: 6),
-                      Text(note.preview,
+                      Text(snippet ?? note.preview,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurface.withValues(alpha: 0.8), height: 1.4)),

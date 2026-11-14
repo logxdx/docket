@@ -140,6 +140,13 @@ class Services {
     }
   }
 
+  /// Notes opened lately, newest first: the quick switcher's list before anything is typed.
+  List<String> get recent => [for (final p in (settings.get('notes.recent') ?? '').split('\n')) if (p.isNotEmpty) p];
+
+  /// [path] was opened.
+  void opened(String path) =>
+      settings.set('notes.recent', [path, ...recent.where((p) => p != path)].take(30).join('\n'));
+
   /// The model server for AI on notes; null until one is set. (Not a model on the phone: the small ones a phone
   /// can run invent and change facts on these jobs, tool/language_models.md.)
   ModelServer? get model {

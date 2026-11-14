@@ -173,6 +173,41 @@ void main() {
       expect(() => book.moveFolder('Archive', 'Archive/Q4/Archive'), throwsStateError);
     });
 
+    test('bookmarks: in Obsidian\'s file, other items kept, following moves, gone with the note', () async {
+      File('${dir.path}/.obsidian/bookmarks.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('{"items":[{"type":"search","query":"tag:#work"},{"type":"group","title":"G","items":[{"type":"file","path":"Plan.md"}]}]}');
+      final plan = await book.create('Plan', text: 'x');
+      final other = await book.create('Other', text: 'y');
+      await book.refresh();
+      expect(book.bookmarked.map((n) => n.title), ['Plan']);
+      await book.toggleBookmark(other);
+      expect(book.isBookmarked(book.byPath('Other.md')!), isTrue);
+      await book.moveNote(book.byPath('Plan.md')!, 'Work');
+      expect(book.bookmarks.files, ['Work/Plan.md', 'Other.md']);
+      await book.rename(book.byPath('Other.md')!, 'Else');
+      expect(book.bookmarks.files, ['Work/Plan.md', 'Else.md']);
+      await book.trash(book.byPath('Else.md')!);
+      expect(book.bookmarks.files, ['Work/Plan.md']);
+      // Obsidian's own items are still there, and the file is the vault's.
+      final saved = File('${dir.path}/.obsidian/bookmarks.json').readAsStringSync();
+      expect(saved, contains('"query": "tag:#work"'));
+      expect(saved, contains('"title": "G"'));
+      final again = Notebook(LocalVault(dir));
+      await again.refresh();
+      expect(again.bookmarks.files, ['Work/Plan.md']);
+      expect(plan.title, 'Plan');
+    });
+
+    test('unlinked mentions: the title as a word, in notes not linking to it', () async {
+      final plan = await book.create('Plan', text: 'x');
+      await book.create('A', text: 'The plan is ready.');
+      await book.create('B', text: 'See [[Plan]].');
+      await book.create('C', text: 'Planning is different.');
+      expect(book.unlinkedMentions(plan).map((n) => n.title), ['A']);
+      expect(book.random(1), isNotNull);
+    });
+
     test('the trash: deleted notes and folders kept in .trash, restored or emptied', () async {
       final a = await book.create('Plan', text: 'a');
       await book.create('Plan', folder: 'Work', text: 'b');

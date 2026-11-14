@@ -28,7 +28,8 @@ import '../settings/settings_screen.dart';
 import '../settings/settings_tiles.dart';
 import 'audio_player.dart';
 import 'markdown_view.dart';
-import '../../core/notes/obsidian.dart' show forReading;
+import 'navigation.dart';
+import '../../core/notes/obsidian.dart' show forReading, headingsOf;
 import 'notes_screen.dart' show pickFolder;
 import 'read_aloud_sheet.dart';
 import 'record_screen.dart';
@@ -37,10 +38,13 @@ import 'spoken_view.dart';
 const taskScheme = 'notes-task:';
 
 class NoteScreen extends StatefulWidget {
-  const NoteScreen({super.key, required this.path, this.startEditing = false});
+  const NoteScreen({super.key, required this.path, this.startEditing = false, this.anchor});
 
   final String path;
   final bool startEditing;
+
+  /// A heading to scroll to once open (a [[Note#Heading]] link).
+  final String? anchor;
 
   @override
   State<NoteScreen> createState() => _NoteScreenState();
@@ -66,6 +70,118 @@ class _NoteScreenState extends State<NoteScreen> {
 
   /// Each recording's playback, by audio name, shared by its player and its transcript.
   final _playbacks = <String, Playback>{};
+
+  /// The reading view's headings, by title and how many times that title came before: what the outline and
+  /// heading links scroll to.
+  final _headingKeys = <String, GlobalKey>{};
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.anchor case final anchor?) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToHeading(anchor, 0));
+    }
+  }
+
+  /// Scroll the reading view to the [nth] heading called [title].
+  void _scrollToHeading(String title, int nth) {
+    final key = _headingKeys['${_norm(title)}#$nth'];
+    final target = key?.currentContext;
+    if (target != null) {
+      Scrollable.ensureVisible(target, duration: const Duration(milliseconds: 300), alignment: 0.02);
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No heading "$title" in this note')));
+    }
+  }
+
+  static String _norm(String s) => s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+  /// The key of a reading-view part that starts with a heading, counted per title ([seen]); null otherwise.
+  GlobalKey? _headingKey(String text, Map<String, int> seen) {
+    final m = RegExp(r'^#{1,6}\s+(.*?)\s*#*\s*$', multiLine: true).firstMatch(text.split('\n').first);
+    if (m == null) return null;
+    final title = _norm(m[1]!);
+    final nth = seen[title] = (seen[title] ?? -1) + 1;
+    return _headingKeys.putIfAbsent('$title#$nth', GlobalKey.new);
+  }
+
+  /// The outline: jump to a heading (in the editor, the cursor goes to it).
+  Future<void> _outline() async {
+    final body = withoutProperties(_text.text);
+    final headings = headingsOf(body);
+    final i = await showOutline(context, headings);
+    if (i == null || !mounted) return;
+    final h = headings[i];
+    if (_editing) {
+      final lines = body.split('\n');
+      final offset = _text.text.length - body.length + lines.take(h.line).fold<int>(0, (n, l) => n + l.length + 1);
+      _text.selection = TextSelection.collapsed(offset: offset + lines[h.line].length);
+      _focus.requestFocus();
+      return;
+    }
+    final nth = headings.take(i).where((x) => _norm(x.title) == _norm(h.title)).length;
+    _scrollToHeading(h.title, nth);
+  }
+
+  final _focus = FocusNode();
+
+  /// Every action on this note, by name.
+  Future<void> _palette() async {
+    final services = ServicesScope.of(context);
+    final note = _book.byPath(_path);
+    final readOnly = _book.readOnly;
+    await showCommandPalette(context, [
+      Command('Open a note…', Icons.search_rounded, () async {
+        final picked = await showQuickSwitcher(context, book: _book, recent: services.recent);
+        if (picked != null && mounted) await _follow(picked.title);
+      }),
+      if (!readOnly) Command(_editing ? 'Reading view' : 'Edit', _editing ? Icons.visibility_outlined : Icons.edit_outlined, _toggleEditing),
+      Command('Outline', Icons.toc_rounded, _outline),
+      if (note != null && !readOnly)
+        Command(_book.isBookmarked(note) ? 'Remove bookmark' : 'Bookmark', Icons.bookmark_outline_rounded, _toggleBookmark),
+      Command('Copy link to this note', Icons.link_rounded, () async {
+        await Clipboard.setData(ClipboardData(text: '[[${note?.title ?? ''}]]'));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Link copied')));
+      }),
+      Command('Summarise', Icons.auto_awesome_outlined, () => _ai('summarise')),
+      if (!readOnly) ...[
+        Command('Tidy up', Icons.auto_fix_high_outlined, () => _ai('tidy')),
+        Command('Record into this note', Icons.mic_none_rounded, _record),
+        Command('Rename', Icons.drive_file_rename_outline_rounded, _rename),
+        Command('Move to folder', Icons.drive_file_move_outlined, _move),
+        Command('Move to trash', Icons.delete_outline_rounded, _delete),
+      ],
+      if (services.ant.status.value.speech)
+        Command('Read aloud', Icons.volume_up_outlined, () async {
+          await _flush();
+          if (mounted) await showReadAloud(context, _text.text);
+        }),
+      Command('Random note', Icons.casino_outlined, () async {
+        final n = _book.random();
+        if (n != null && mounted) await _follow(n.title);
+      }),
+    ]);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _toggleEditing() async {
+    await _flush();
+    final leaving = _editing;
+    setState(() => _editing = !_editing);
+    if (leaving) await _enrich();
+  }
+
+  Future<void> _toggleBookmark() async {
+    await _flush();
+    final note = _book.byPath(_path);
+    if (note == null) return;
+    await _book.toggleBookmark(note);
+    if (mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(_book.isBookmarked(note) ? 'Bookmarked' : 'Bookmark removed')));
+    }
+  }
 
   /// Add today's journaling [prompt] as a heading and write under it.
   void _journal(String prompt) {
@@ -94,6 +210,7 @@ class _NoteScreenState extends State<NoteScreen> {
       _text.text = _saved = _last = note?.text ?? '';
       _editing = !_book.readOnly && (widget.startEditing || _saved.trim().isEmpty);
     }
+    if (_summaries == null) ServicesScope.of(context).opened(_path);
     _summaries ??= ServicesScope.of(context).summaries..addListener(_summaryLanded);
     _recordings ??= ServicesScope.of(context).recordings..addListener(_recordingLanded);
   }
@@ -197,6 +314,7 @@ class _NoteScreenState extends State<NoteScreen> {
 
   @override
   void dispose() {
+    _focus.dispose();
     _summaries?.removeListener(_summaryLanded);
     _recordings?.removeListener(_recordingLanded);
     for (final p in _playbacks.values) {
@@ -304,8 +422,8 @@ class _NoteScreenState extends State<NoteScreen> {
   }
 
   /// Open the note a link names, making it (Obsidian does too) if missing
-  /// and the notes are not read only.
-  Future<void> _follow(String title) async {
+  /// and the notes are not read only; scrolled to [anchor], a heading, when given.
+  Future<void> _follow(String title, {String? anchor}) async {
     await _flush();
     final book = _book;
     final found = book.byTitle(title);
@@ -315,7 +433,7 @@ class _NoteScreenState extends State<NoteScreen> {
     }
     final note = found ?? await book.create(title);
     if (!mounted) return;
-    await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => NoteScreen(path: note.path)));
+    await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => NoteScreen(path: note.path, anchor: anchor)));
     if (mounted) setState(() {});
   }
 
@@ -490,7 +608,14 @@ class _NoteScreenState extends State<NoteScreen> {
   void _onLink(String url) {
     if (url.startsWith(noteScheme)) {
       final target = Uri.decodeComponent(url.substring(noteScheme.length));
-      _follow(target.split(RegExp(r'[#^]')).first.trim());
+      final title = target.split(RegExp(r'[#^]')).first.trim();
+      final hash = target.indexOf('#');
+      final heading = hash >= 0 && !target.substring(hash + 1).startsWith('^') ? target.substring(hash + 1).trim() : null;
+      if (heading != null && (title.isEmpty || _book.byTitle(title)?.path == _path)) {
+        _scrollToHeading(heading, 0); // a heading in this note
+      } else {
+        _follow(title, anchor: heading);
+      }
     } else if (url.startsWith(taskScheme)) {
       _tick(int.parse(url.substring(taskScheme.length)));
     } else if (Uri.tryParse(url) case final uri? when safeLink(uri)) {
@@ -504,6 +629,7 @@ class _NoteScreenState extends State<NoteScreen> {
     final note = book.byPath(_path);
     final theme = Theme.of(context);
     final backlinks = note == null ? const <Note>[] : book.backlinks(note);
+    final headingsSeen = <String, int>{};
     final readOnly = book.readOnly;
     final prompts = readOnly || !isTodaysNote(_path, DateTime.now()) ? const <String>[] : promptsFor(DateTime.now(), _text.text);
     final journal = prompts.isEmpty
@@ -525,12 +651,7 @@ class _NoteScreenState extends State<NoteScreen> {
             IconButton(
               tooltip: _editing ? 'Read' : 'Edit',
               icon: Icon(_editing ? Icons.visibility_outlined : Icons.edit_outlined),
-              onPressed: () async {
-                await _flush();
-                final leaving = _editing;
-                setState(() => _editing = !_editing);
-                if (leaving) await _enrich();
-              },
+              onPressed: _toggleEditing,
             ),
           if (ServicesScope.of(context).ant.status.value.speech)
             IconButton(
@@ -560,19 +681,27 @@ class _NoteScreenState extends State<NoteScreen> {
               icon: const Icon(Icons.mic_none_rounded),
               onPressed: _record,
             ),
-          if (!readOnly)
-            PopupMenuButton<String>(
-              onSelected: (choice) => switch (choice) {
-                'delete' => _delete(),
-                'move' => _move(),
-                _ => _rename(),
-              },
-              itemBuilder: (context) => const [
+          PopupMenuButton<String>(
+            onSelected: (choice) => switch (choice) {
+              'delete' => _delete(),
+              'move' => _move(),
+              'outline' => _outline(),
+              'bookmark' => _toggleBookmark(),
+              'commands' => _palette(),
+              _ => _rename(),
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: 'commands', child: Text('Command palette')),
+              const PopupMenuItem(value: 'outline', child: Text('Outline')),
+              if (!readOnly && note != null)
+                PopupMenuItem(value: 'bookmark', child: Text(book.isBookmarked(note) ? 'Remove bookmark' : 'Bookmark')),
+              if (!readOnly) ...const [
                 PopupMenuItem(value: 'rename', child: Text('Rename')),
                 PopupMenuItem(value: 'move', child: Text('Move to folder')),
                 PopupMenuItem(value: 'delete', child: Text('Move to trash')),
               ],
-            ),
+            ],
+          ),
         ],
       ),
       body: _editing
@@ -582,6 +711,7 @@ class _NoteScreenState extends State<NoteScreen> {
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
                   child: TextField(
                     controller: _text,
+                    focusNode: _focus,
                     cursorColor: Accent.of(context),
                     style: theme.textTheme.bodyLarge?.copyWith(height: 1.55),
                     undoController: _undo,
@@ -625,7 +755,8 @@ class _NoteScreenState extends State<NoteScreen> {
               // is cut into parts.
               for (final (i, part) in noteParts(forReading(withoutProperties(taskLinks(_text.text, taskScheme)))).indexed)
                 switch (part) {
-                  MarkdownPart(:final text) => SelectionArea(child: NoteMarkdown(text, onLink: _onLink)),
+                  MarkdownPart(:final text) =>
+                    SelectionArea(key: _headingKey(text, headingsSeen), child: NoteMarkdown(text, onLink: _onLink)),
                   // Keyed by place and kind: a card added above (the properties) must not hand one callout's
                   // folding to another.
                   CalloutPart() => CalloutBox(
@@ -667,6 +798,25 @@ class _NoteScreenState extends State<NoteScreen> {
                   for (final b in backlinks) (b.title, b.preview, () => _follow(b.title)),
                 ]),
               ],
+              if (note != null && note.links.isNotEmpty) ...[
+                Divider(height: 40, color: theme.colorScheme.outlineVariant),
+                _LinkSection(label: 'Links to', icon: Icons.north_east_rounded, rows: [
+                  for (final l in {for (final l in note.links) l.toLowerCase(): l}.values)
+                    if (book.byTitle(l) case final target?)
+                      (target.title, target.preview, () => _follow(target.title))
+                    else
+                      (l, 'Not created yet', () => _follow(l)),
+                ]),
+              ],
+              if (note != null) ...switch (book.unlinkedMentions(note)) {
+                final mentions when mentions.isNotEmpty => [
+                    Divider(height: 40, color: theme.colorScheme.outlineVariant),
+                    _LinkSection(label: 'Mentioned in (not linked)', icon: Icons.link_off_rounded, rows: [
+                      for (final m in mentions.take(20)) (m.title, m.preview, () => _follow(m.title)),
+                    ]),
+                  ],
+                _ => const <Widget>[],
+              },
             ]),
     );
   }

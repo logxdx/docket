@@ -10,7 +10,9 @@ import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 
+import 'bookmarks.dart';
 import 'properties.dart';
+import 'search.dart';
 import 'vault.dart';
 
 class Note {
@@ -109,6 +111,9 @@ class Notebook extends ChangeNotifier {
 
   /// The vault's folders, empty ones too (refreshed with the notes).
   final _folders = <String>{};
+
+  /// Bookmarked notes, shared with Obsidian (.obsidian/bookmarks.json).
+  Bookmarks bookmarks = Bookmarks.parse(null);
   bool loading = false;
 
   List<Note> get notes => _notes.values.toList()..sort((a, b) => b.file.mtime.compareTo(a.file.mtime));
@@ -157,6 +162,11 @@ class Notebook extends ChangeNotifier {
       } on Object {
         // Folders unreadable: those the notes are in still show.
       }
+      try {
+        bookmarks = Bookmarks.parse(await vault.readAttachment(Bookmarks.path));
+      } on Object {
+        // None, or unreadable: none.
+      }
       _saveCache();
     } finally {
       loading = false;
@@ -192,22 +202,8 @@ class Notebook extends ChangeNotifier {
     return counts.entries.map((e) => (e.key, e.value)).toList()..sort((a, b) => b.$2.compareTo(a.$2));
   }
 
-  /// Notes whose title or text holds every word of [query]; titles first.
-  List<Note> search(String query) {
-    final words = query.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
-    if (words.isEmpty) return notes;
-    final titled = <Note>[], texted = <Note>[];
-    for (final n in notes) {
-      final title = n.title.toLowerCase();
-      final text = n.text.toLowerCase();
-      if (words.every(title.contains)) {
-        titled.add(n);
-      } else if (words.every((w) => title.contains(w) || text.contains(w))) {
-        texted.add(n);
-      }
-    }
-    return [...titled, ...texted];
-  }
+  /// Notes matching [query] in Obsidian's search syntax (lib/core/notes/search.dart); title matches first.
+  List<Note> search(String query) => SearchQuery.parse(query).run(notes);
 
   /// Every folder: the vault's own (empty ones too), those notes are in and their parents, by name.
   List<String> get folders {
@@ -251,6 +247,7 @@ class Notebook extends ChangeNotifier {
     final moved = Note(file: file, text: note.text);
     _notes[path] = moved;
     await _relinkPaths({_noExt(note.path): _noExt(path)});
+    await _bookmarksMoved({note.path: path});
     _saveCache();
     notifyListeners();
     return _notes[path] ?? moved;
@@ -273,6 +270,7 @@ class Notebook extends ChangeNotifier {
       ..addAll(renamed.values);
     await refresh();
     await _relinkPaths({for (final n in inside) _noExt(n.path): _noExt('$to${n.path.substring(from.length)}')});
+    await _bookmarksMoved({for (final n in inside) n.path: to.startsWith('$trashDir/') ? null : '$to${n.path.substring(from.length)}'});
   }
 
   /// Rename the folder [path] to [name] where it is.
@@ -306,6 +304,7 @@ class Notebook extends ChangeNotifier {
     // Under its own path, so it can go back where it was.
     await vault.move(note.file, await _freeInTrash(note.path));
     _notes.remove(note.path);
+    await _bookmarksMoved({note.path: null});
     _saveCache();
     notifyListeners();
   }
@@ -354,6 +353,48 @@ class Notebook extends ChangeNotifier {
       candidate = '$trashDir/$base $n$ext';
     }
     return candidate;
+  }
+
+  /// The bookmarked notes that are in the vault, in their order.
+  List<Note> get bookmarked => [for (final p in bookmarks.files) ?_notes[p]];
+
+  bool isBookmarked(Note note) => bookmarks.has(note.path);
+
+  /// Bookmark [note], or take its bookmark off.
+  Future<void> toggleBookmark(Note note) async {
+    await _saveBookmarks(bookmarks.toggled(note.path, now: DateTime.now().millisecondsSinceEpoch));
+  }
+
+  Future<void> _saveBookmarks(Bookmarks next) async {
+    final json = next.toJson();
+    if (json == bookmarks.toJson()) return;
+    bookmarks = next;
+    notifyListeners();
+    await vault.write(Bookmarks.path, '$json\n', mime: 'application/json');
+  }
+
+  /// Bookmarks follow notes that moved ([to] null: gone).
+  Future<void> _bookmarksMoved(Map<String, String?> moves) async {
+    if (moves.keys.any(bookmarks.has)) await _saveBookmarks(bookmarks.moved(moves));
+  }
+
+  /// Notes that mention [note]'s title (as a word) without linking to it: Obsidian's unlinked mentions.
+  List<Note> unlinkedMentions(Note note) {
+    final title = RegExp('(?<![\\p{L}\\p{N}])${RegExp.escape(note.title)}(?![\\p{L}\\p{N}])', caseSensitive: false, unicode: true);
+    return [
+      for (final n in notes)
+        if (n.path != note.path &&
+            !n.links.any((l) => l.toLowerCase() == note.title.toLowerCase()) &&
+            title.hasMatch(withoutProperties(n.text).replaceAll(RegExp(r'\[\[[^\]]*\]\]'), '')))
+          n,
+    ];
+  }
+
+  /// A note picked at random, or null in an empty vault.
+  Note? random([int? seed]) {
+    final all = notes;
+    if (all.isEmpty) return null;
+    return all[(seed ?? DateTime.now().microsecondsSinceEpoch) % all.length];
   }
 
   /// A copy of [note] next to it ("Plan 2").
@@ -424,6 +465,7 @@ class Notebook extends ChangeNotifier {
     for (final other in [..._notes.values]) {
       if (other.text.contains(old)) await save(other.path, other.text.replaceAllMapped(old, (m) => '[[$name${m[1]}]]'));
     }
+    await _bookmarksMoved({note.path: path});
     _saveCache();
     notifyListeners();
     return moved;

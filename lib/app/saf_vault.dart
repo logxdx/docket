@@ -42,10 +42,10 @@ class SafVault implements Vault {
   Future<String> read(VaultFile file) async => utf8.decode(await _stream.readFileBytes(file.uri), allowMalformed: true);
 
   @override
-  Future<VaultFile> write(String path, String text) async {
+  Future<VaultFile> write(String path, String text, {String mime = 'text/markdown'}) async {
     final parts = path.split('/');
     final dir = parts.length > 1 ? (await _util.mkdirp(treeUri, parts.sublist(0, parts.length - 1))).uri : treeUri;
-    await _stream.writeFileBytes(dir, parts.last, 'text/markdown', Uint8List.fromList(utf8.encode(text)), overwrite: true);
+    await _stream.writeFileBytes(dir, parts.last, mime, Uint8List.fromList(utf8.encode(text)), overwrite: true);
     final file = await _util.child(treeUri, parts);
     return VaultFile(
       path: path,
