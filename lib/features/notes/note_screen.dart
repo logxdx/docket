@@ -35,6 +35,7 @@ import '../../core/notes/fuzzy.dart';
 import '../../core/notes/moment.dart';
 import '../../core/notes/obsidian.dart' show countWords, forReading, headingsOf;
 import 'notes_screen.dart' show pickFolder;
+import 'views_screens.dart' show SlidesScreen;
 import 'read_aloud_sheet.dart';
 import 'record_screen.dart';
 import 'spoken_view.dart';
@@ -144,6 +145,8 @@ class _NoteScreenState extends State<NoteScreen> {
       }),
       if (!readOnly) Command(_editing ? 'Reading view' : 'Edit', _editing ? Icons.visibility_outlined : Icons.edit_outlined, _toggleEditing),
       Command('Outline', Icons.toc_rounded, _outline),
+      Command('Start presentation', Icons.slideshow_outlined, () => Navigator.push(context,
+          MaterialPageRoute<void>(builder: (_) => SlidesScreen(text: _text.text, title: note?.title ?? '')))),
       if (note != null && !readOnly)
         Command(_book.isBookmarked(note) ? 'Remove bookmark' : 'Bookmark', Icons.bookmark_outline_rounded, _toggleBookmark),
       if (!readOnly) ...[

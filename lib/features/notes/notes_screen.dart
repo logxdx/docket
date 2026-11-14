@@ -9,8 +9,10 @@ import 'package:flutter/material.dart';
 
 import '../../app/services.dart';
 import '../../app/theme.dart';
+import '../../core/notes/bases.dart';
 import '../../core/notes/notebook.dart';
 import '../../core/notes/search.dart';
+import '../../core/notes/vault.dart';
 import '../settings/settings_screen.dart';
 import '../settings/settings_tiles.dart';
 import 'graph_screen.dart';
@@ -19,6 +21,7 @@ import 'note_tools.dart';
 import 'note_screen.dart';
 import 'record_screen.dart';
 import 'trash_screen.dart';
+import 'views_screens.dart';
 
 class NotesScreen extends StatefulWidget {
   const NotesScreen({super.key});
@@ -259,6 +262,8 @@ class _NotesScreenState extends State<NotesScreen> {
           _tag = tag;
           _selected.clear();
         }
+      case 'canvas' || 'base':
+        await _newFile(choice);
       case 'unique':
         final note = await _book.createUnique(folder: _flat ? '' : _folder);
         if (mounted) await _open(note, edit: true);
@@ -271,6 +276,21 @@ class _NotesScreenState extends State<NotesScreen> {
     }
     if (mounted) setState(() {});
   }
+
+  /// A new canvas or base in the folder being looked at, opened.
+  Future<void> _newFile(String kind) async {
+    final canvas = kind == 'canvas';
+    final name = await _askName(canvas ? 'New canvas' : 'New base', 'Create');
+    if (name == null || name.trim().isEmpty) return;
+    final file = await _book.createFile(
+        _flat ? '' : _folder, name, canvas ? '.canvas' : '.base', canvas ? '{"nodes":[],"edges":[]}' : newBaseText);
+    if (mounted) _openFile(file);
+  }
+
+  void _openFile(VaultFile f) => Navigator.push(
+        context,
+        MaterialPageRoute<void>(builder: (_) => f.path.endsWith('.canvas') ? CanvasScreen(file: f) : BaseScreen(file: f)),
+      );
 
   Future<void> _switcher() async {
     final note = await showQuickSwitcher(context, book: _book, recent: _s.recent);
@@ -286,6 +306,8 @@ class _NotesScreenState extends State<NotesScreen> {
         Command('New note', Icons.note_add_outlined, _new),
         Command('New folder', Icons.create_new_folder_outlined, _newFolder),
         Command('New unique note', Icons.fiber_new_outlined, () => _menu('unique')),
+        Command('New canvas', Icons.dashboard_customize_outlined, () => _menu('canvas')),
+        Command('New base', Icons.table_chart_outlined, () => _menu('base')),
         Command("Today's note", Icons.today_rounded, () async {
           final note = await _book.daily();
           if (mounted) await _open(note, edit: true);
@@ -443,6 +465,8 @@ class _NotesScreenState extends State<NotesScreen> {
             const PopupMenuItem(value: 'switcher', child: ListTile(leading: Icon(Icons.search_rounded), title: Text('Open a note…'))),
             const PopupMenuItem(value: 'commands', child: ListTile(leading: Icon(Icons.terminal_rounded), title: Text('Command palette'))),
             if (!readOnly) const PopupMenuItem(value: 'folder', child: ListTile(leading: Icon(Icons.create_new_folder_outlined), title: Text('New folder'))),
+            if (!readOnly) const PopupMenuItem(value: 'canvas', child: ListTile(leading: Icon(Icons.dashboard_customize_outlined), title: Text('New canvas'))),
+            if (!readOnly) const PopupMenuItem(value: 'base', child: ListTile(leading: Icon(Icons.table_chart_outlined), title: Text('New base'))),
             const PopupMenuItem(value: 'random', child: ListTile(leading: Icon(Icons.casino_outlined), title: Text('Random note'))),
             const PopupMenuItem(value: 'tags', child: ListTile(leading: Icon(Icons.tag_rounded), title: Text('Tags'))),
             const PopupMenuDivider(),
@@ -479,6 +503,7 @@ class _NotesScreenState extends State<NotesScreen> {
         if (_folder.isNotEmpty && !_book.folders.contains(_folder)) _folder = '';
         final List<String> folders;
         final List<Note> notes;
+        var others = const <VaultFile>[];
         final searching = _query.text.trim().isNotEmpty;
         if (_flat) {
           folders = const [];
@@ -488,6 +513,7 @@ class _NotesScreenState extends State<NotesScreen> {
         } else {
           folders = _book.subfolders(_folder);
           notes = _sorted(_book.notesIn(_folder));
+          others = [..._book.othersIn(_folder)]..sort((a, b) => a.path.toLowerCase().compareTo(b.path.toLowerCase()));
         }
         final shown = <_Item>[
           for (final f in folders) (folder: true, path: f),
@@ -566,7 +592,7 @@ class _NotesScreenState extends State<NotesScreen> {
               if (!_flat && _folder.isNotEmpty) _Breadcrumb(folder: _folder, onGo: _go),
               if (_book.loading) const LinearProgressIndicator(minHeight: 2),
               Expanded(
-                child: shown.isEmpty
+                child: shown.isEmpty && others.isEmpty
                     ? Center(
                         child: Padding(
                           padding: const EdgeInsets.all(32),
@@ -587,10 +613,16 @@ class _NotesScreenState extends State<NotesScreen> {
                       )
                     : ListView.separated(
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-                        itemCount: shown.length,
+                        itemCount: shown.length + others.length,
                         separatorBuilder: (_, _) => const SizedBox(height: 10),
-                        itemBuilder: (context, i) {
-                          final item = shown[i];
+                        itemBuilder: (context, at) {
+                          // Folders, then canvases and bases, then notes.
+                          final other = at - folders.length;
+                          if (other >= 0 && other < others.length) {
+                            final f = others[other];
+                            return _FileCard(file: f, onTap: _selecting ? null : () => _openFile(f));
+                          }
+                          final item = shown[other < 0 ? at : at - others.length];
                           final selected = _selected.contains(item);
                           void tap() {
                             if (_selecting) {
@@ -732,6 +764,39 @@ class _FolderCard extends StatelessWidget {
               ]),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A canvas or a base, opened in its own view.
+class _FileCard extends StatelessWidget {
+  const _FileCard({required this.file, required this.onTap});
+
+  final VaultFile file;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final canvas = file.path.endsWith('.canvas');
+    final name = file.path.split('/').last.replaceFirst(RegExp(r'\.(canvas|base)$'), '');
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(children: [
+            Icon(canvas ? Icons.dashboard_customize_outlined : Icons.table_chart_outlined, color: Accent.of(context)),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(name,
+                  maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w500)),
+            ),
+            Text(canvas ? 'Canvas' : 'Base', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+          ]),
         ),
       ),
     );
