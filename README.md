@@ -102,6 +102,28 @@ Settings, as its licence asks).
 `integration_test/pipeline_test.dart` runs every model through the app's
 own code on a device or emulator (see its header).
 
+## Build, CI and releases
+- `tool/ci.sh`: analysis, Dart tests, Kotlin tests and a debug APK. The
+  GitHub workflow `.github/workflows/ci.yml` runs exactly this.
+- `tool/release.sh vX.Y.Z [--publish]`: fetches and checks the models
+  (`tool/fetch_models.py`), stages all but Voz (`tool/stage_models.py`),
+  builds the arm64 APK (refusing one without the app's code or over GitHub's
+  2 GiB per file), packs Voz, writes `SHA256SUMS`, and with `--publish`
+  tags and creates the GitHub release. `.github/workflows/release.yml` runs
+  it on a `v*` tag. Both workflows are disabled on GitHub while Actions
+  minutes are out (`gh workflow enable CI` / `Release` to turn them back on);
+  run the scripts locally meanwhile.
+- Signing: `DOCKET_KEYSTORE`, `DOCKET_KEYSTORE_PASSWORD`, `DOCKET_KEY_ALIAS`,
+  `DOCKET_KEY_PASSWORD` when set (CI secrets: `DOCKET_KEYSTORE_BASE64` and the
+  rest), else the debug key. Moving to a real key changes the signature, so
+  installed copies must be uninstalled once.
+- **Voz** is not in the APK (it would pass GitHub's limit): Settings ›
+  Transcript model › Import Voz takes the release's `docket-voz-*.zip` (or its
+  six files), each checked against its pinned size and sha256. Phonon writes
+  transcripts until then.
+- **Custom voices**: Settings › Voice › Custom voices › + adds any Phonon voice
+  file (`.safetensors`, `speaker_wavs` [1, 512, n]) after checking it.
+
 ## Names
 The app is **Docket** (its icon: a pen with a line, `tool/icon/docket.svg`;
 `tool/icon/render.sh` renders every launcher size). The package is still
