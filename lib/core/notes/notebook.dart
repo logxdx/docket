@@ -114,6 +114,9 @@ class Notebook extends ChangeNotifier {
   /// The vault's folders, empty ones too (refreshed with the notes).
   final _folders = <String>{};
 
+  /// The vault's canvases (.canvas) and bases (.base), refreshed with the notes.
+  List<VaultFile> others = const [];
+
   /// Bookmarked notes, shared with Obsidian (.obsidian/bookmarks.json).
   Bookmarks bookmarks = Bookmarks.parse(null);
   bool loading = false;
@@ -163,6 +166,11 @@ class Notebook extends ChangeNotifier {
           ..addAll(await vault.folders());
       } on Object {
         // Folders unreadable: those the notes are in still show.
+      }
+      try {
+        others = [...await vault.listFiles('.canvas'), ...await vault.listFiles('.base')];
+      } on Object {
+        // Unreadable: none shown.
       }
       try {
         bookmarks = Bookmarks.parse(await vault.readAttachment(Bookmarks.path));
@@ -402,6 +410,30 @@ class Notebook extends ChangeNotifier {
     final all = notes;
     if (all.isEmpty) return null;
     return all[(seed ?? DateTime.now().microsecondsSinceEpoch) % all.length];
+  }
+
+  /// The canvases and bases directly in [folder].
+  List<VaultFile> othersIn(String folder) => [for (final f in others) if (parentOf(f.path) == folder) f];
+
+  /// A new canvas or base ([suffix] ".canvas", ".base") called [name] in [folder], starting as [text].
+  Future<VaultFile> createFile(String folder, String name, String suffix, String text) async {
+    final base = fileName(name);
+    var path = _join(folder, '$base$suffix');
+    for (var n = 2; others.any((f) => f.path == path); n++) {
+      path = _join(folder, '$base $n$suffix');
+    }
+    final file = await vault.write(path, text, mime: suffix == '.canvas' ? 'application/json' : 'text/yaml');
+    others = [...others, file];
+    notifyListeners();
+    return file;
+  }
+
+  /// Save a canvas or base.
+  Future<VaultFile> saveFile(String path, String text) async {
+    final file = await vault.write(path, text, mime: path.endsWith('.canvas') ? 'application/json' : 'text/yaml');
+    others = [for (final f in others) if (f.path != path) f, file];
+    notifyListeners();
+    return file;
   }
 
   /// A copy of [note] next to it ("Plan 2").

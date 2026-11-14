@@ -68,6 +68,9 @@ abstract class Vault {
 
   /// The bytes of the file at [path] (an image), or null when it is not there.
   Future<Uint8List?> readBytes(String path);
+
+  /// Every file whose name ends with [suffix] (".canvas", ".base"), as [list] finds notes.
+  Future<List<VaultFile>> listFiles(String suffix);
 }
 
 class LocalVault implements Vault {
@@ -206,6 +209,12 @@ class LocalVault implements Vault {
   }
 
   @override
+  Future<List<VaultFile>> listFiles(String suffix) async => [
+        await for (final (f, stat) in _walk(suffix))
+          VaultFile(path: f.path.substring(root.path.length + 1), uri: f.path, mtime: stat.modified.millisecondsSinceEpoch, size: stat.size),
+      ];
+
+  @override
   Future<List<VaultFile>> listIn(String folder) async {
     final dir = Directory('${root.path}/$folder');
     if (!dir.existsSync()) return [];
@@ -273,6 +282,9 @@ class ReadOnlyVault implements Vault {
 
   @override
   Future<Uint8List?> readBytes(String path) => inner.readBytes(path);
+
+  @override
+  Future<List<VaultFile>> listFiles(String suffix) => inner.listFiles(suffix);
 }
 
 class ReadOnlyNotes implements Exception {

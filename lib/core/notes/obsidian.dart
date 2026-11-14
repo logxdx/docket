@@ -185,3 +185,22 @@ List<({int level, String title, int line})> headingsOf(String text) {
       .length;
   return (words: words + cjk.allMatches(text).length, characters: text.trim().length);
 }
+
+/// A note as slides, as Obsidian's Slides plugin shows it: its body cut at each line that is only "---" (outside
+/// code), empty slides left out.
+List<String> slidesOf(String body) {
+  final slides = <String>[];
+  final buf = <String>[];
+  var inCode = false;
+  for (final line in body.split('\n')) {
+    if (line.trimLeft().startsWith('```')) inCode = !inCode;
+    if (!inCode && line.trim() == '---') {
+      if (buf.join('\n').trim().isNotEmpty) slides.add(buf.join('\n').trim());
+      buf.clear();
+      continue;
+    }
+    buf.add(line);
+  }
+  if (buf.join('\n').trim().isNotEmpty) slides.add(buf.join('\n').trim());
+  return slides;
+}
