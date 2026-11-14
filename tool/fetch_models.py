@@ -272,11 +272,14 @@ def main():
         for e in entries:
             dest = os.path.join(root, model_id, e["path"])
             os.makedirs(os.path.dirname(dest), exist_ok=True)
-            if os.path.exists(dest) and os.path.getsize(dest) == e["size"] and (
-                    not e["sha256"] or sha256(dest) == e["sha256"]):
-                continue
-            print(f"  {e['path']}")
-            fetch(f"{HUB}/{repo}/resolve/{revision}/{e['path']}", dest, e["size"], e["sha256"])
+            if not (os.path.exists(dest) and os.path.getsize(dest) == e["size"] and (
+                    not e["sha256"] or sha256(dest) == e["sha256"])):
+                print(f"  {e['path']}")
+                fetch(f"{HUB}/{repo}/resolve/{revision}/{e['path']}", dest, e["size"], e["sha256"])
+            # Small files the Hub keeps out of LFS have no checksum there: pin their own, so the app can
+            # check every file it is given (an imported model's too).
+            if not e["sha256"]:
+                e["sha256"] = sha256(dest)
     for model_id, parts in MULTI.items():
         entry, size = fetch_multi_model(model_id, parts, root, only_list)
         total += size

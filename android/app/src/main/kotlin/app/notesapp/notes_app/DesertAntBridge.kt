@@ -330,7 +330,8 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
 
     private fun status(): Map<String, Any?> = mapOf(
         "bundled" to offline.bundledIds(),
-        "ready" to offline.bundledIds().filter(offline::isReady),
+        // Ready: carried by the APK, or imported by the user (Voz), with every file in place.
+        "ready" to (offline.bundledIds() + offline.importableIds()).filter(offline::isReady),
         "align" to extras.canAlign,
         "phonon" to canPhonon,
         "importable" to offline.importableIds(),

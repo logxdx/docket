@@ -64,7 +64,9 @@ class OfflineModels(private val context: Context) {
         val files = model.getJSONArray("files")
         val wanted = (0 until files.length()).associate {
             val f = files.getJSONObject(it)
-            f.getString("path").substringAfterLast('/') to Triple(f.getString("path"), f.getLong("size"), f.optString("sha256"))
+            // A JSON null (no checksum pinned) is no checksum, not the text "null".
+            val sha = if (f.isNull("sha256")) "" else f.optString("sha256")
+            f.getString("path").substringAfterLast('/') to Triple(f.getString("path"), f.getLong("size"), sha)
         }
         val total = wanted.values.sumOf { it.second }
         val dir = File(root, id)
