@@ -133,5 +133,67 @@ void main() {
       await again.refresh();
       expect(again.notes.map((n) => n.title).toSet(), {'Groceries', 'Recipes', 'From Obsidian'});
     });
+
+    test('folders: empty ones kept, notes moved in and out, links by path follow', () async {
+      final plan = await book.create('Plan', text: 'x');
+      await book.create('Index', text: 'See [[Plan]] and [[Work/Plan|the plan]].');
+      expect(await book.createFolder('', 'Work'), 'Work');
+      await book.createFolder('Work', 'Q4');
+      expect(book.folders, ['Work', 'Work/Q4']);
+      expect(book.subfolders(''), ['Work']);
+      expect(() => book.createFolder('', 'Work'), throwsStateError);
+      expect(() => book.createFolder('', '.hidden'), throwsStateError);
+
+      final moved = await book.moveNote(plan, 'Work');
+      expect(moved.path, 'Work/Plan.md');
+      expect(book.notesIn('Work').map((n) => n.title), ['Plan']);
+      expect(book.countIn('Work'), 1);
+      // A link by name needs nothing; one by path follows on the next move.
+      await book.moveNote(book.byPath('Work/Plan.md')!, 'Work/Q4');
+      expect(book.byPath('Index.md')!.text, 'See [[Plan]] and [[Work/Q4/Plan|the plan]].');
+
+      // A fresh index still sees the empty folder.
+      await book.createFolder('', 'Empty');
+      final again = Notebook(LocalVault(dir));
+      await again.refresh();
+      expect(again.folders, ['Empty', 'Work', 'Work/Q4']);
+    });
+
+    test('folders renamed and moved with their notes; a folder never into itself', () async {
+      await book.createFolder('', 'Work');
+      await book.create('Plan', folder: 'Work/Q4', text: 'x');
+      await book.create('Index', text: '[[Work/Q4/Plan]]');
+      expect(await book.renameFolder('Work', 'Job'), 'Job');
+      expect(book.byPath('Job/Q4/Plan.md'), isNotNull);
+      expect(book.byPath('Index.md')!.text, '[[Job/Q4/Plan]]');
+      expect(book.folders, ['Job', 'Job/Q4']);
+      await book.createFolder('', 'Archive');
+      await book.moveFolder('Job/Q4', 'Archive/Q4');
+      expect(book.byPath('Archive/Q4/Plan.md'), isNotNull);
+      expect(() => book.moveFolder('Archive', 'Archive/Q4/Archive'), throwsStateError);
+    });
+
+    test('the trash: deleted notes and folders kept in .trash, restored or emptied', () async {
+      final a = await book.create('Plan', text: 'a');
+      await book.create('Plan', folder: 'Work', text: 'b');
+      await book.trash(a);
+      await book.trash(book.byPath('Work/Plan.md')!);
+      expect(book.byPath('Plan.md'), isNull);
+      expect((await book.trashed()).map((f) => f.path).toSet(), {'.trash/Plan.md', '.trash/Plan 2.md'});
+      // The trash is not in the notes, the folders or the search.
+      expect(book.notes, isEmpty);
+      expect(book.folders, ['Work']);
+
+      await book.create('Old', folder: 'Archive', text: 'c');
+      await book.trashFolder('Archive');
+      expect(book.folders, ['Work']);
+      expect((await book.trashed()).map((f) => f.path), contains('.trash/Archive/Old.md'));
+
+      final back = await book.restore((await book.trashed()).firstWhere((f) => f.path == '.trash/Plan.md'));
+      expect(back.path, 'Plan.md');
+      expect(back.text, 'a');
+      await book.emptyTrash();
+      expect(await book.trashed(), isEmpty);
+    });
   });
 }

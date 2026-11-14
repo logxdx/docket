@@ -106,6 +106,9 @@ class Notebook extends ChangeNotifier {
   final File? cache;
 
   final _notes = <String, Note>{};
+
+  /// The vault's folders, empty ones too (refreshed with the notes).
+  final _folders = <String>{};
   bool loading = false;
 
   List<Note> get notes => _notes.values.toList()..sort((a, b) => b.file.mtime.compareTo(a.file.mtime));
@@ -147,6 +150,13 @@ class Notebook extends ChangeNotifier {
         }
       }
       _notes.removeWhere((path, _) => !seen.contains(path));
+      try {
+        _folders
+          ..clear()
+          ..addAll(await vault.folders());
+      } on Object {
+        // Folders unreadable: those the notes are in still show.
+      }
       _saveCache();
     } finally {
       loading = false;
@@ -199,8 +209,160 @@ class Notebook extends ChangeNotifier {
     return [...titled, ...texted];
   }
 
-  /// Folders that hold notes, sorted.
-  List<String> get folders => {for (final n in _notes.values) if (n.folder.isNotEmpty) n.folder}.toList()..sort();
+  /// Every folder: the vault's own (empty ones too), those notes are in and their parents, by name.
+  List<String> get folders {
+    final all = <String>{..._folders};
+    for (final n in _notes.values) {
+      for (var f = n.folder; f.isNotEmpty; f = parentOf(f)) {
+        all.add(f);
+      }
+    }
+    return all.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  }
+
+  /// The folders directly in [parent] ('' for the top).
+  List<String> subfolders(String parent) => [for (final f in folders) if (parentOf(f) == parent) f];
+
+  /// The notes directly in [folder].
+  List<Note> notesIn(String folder) => [for (final n in notes) if (n.folder == folder) n];
+
+  /// How many notes are in [folder] and the folders in it.
+  int countIn(String folder) => _notes.values.where((n) => n.folder == folder || n.folder.startsWith('$folder/')).length;
+
+  /// A new folder [name] in [parent].
+  Future<String> createFolder(String parent, String name) async {
+    final clean = _cleanName(name);
+    final path = _join(parent, clean);
+    if (folders.contains(path)) throw StateError('A folder called "$clean" already exists');
+    await vault.makeFolder(path);
+    _folders.add(path);
+    notifyListeners();
+    return path;
+  }
+
+  /// Move [note] into [folder]. [[Links]] by name keep working; links written with its folder ([[Old/Note]])
+  /// follow it.
+  Future<Note> moveNote(Note note, String folder) async {
+    if (note.folder == folder) return note;
+    final path = _join(folder, '${note.title}.md');
+    if (_notes.containsKey(path)) throw StateError('${folder.isEmpty ? 'The top folder' : '"$folder"'} already has "${note.title}"');
+    final file = await vault.move(note.file, path);
+    _notes.remove(note.path);
+    final moved = Note(file: file, text: note.text);
+    _notes[path] = moved;
+    await _relinkPaths({_noExt(note.path): _noExt(path)});
+    _saveCache();
+    notifyListeners();
+    return _notes[path] ?? moved;
+  }
+
+  /// Move the folder [from] to [to] (renamed, or into another folder) with everything in it; links written with
+  /// its path follow.
+  Future<void> moveFolder(String from, String to) async {
+    if (from == to) return;
+    if (to == from || to.startsWith('$from/')) throw StateError('A folder cannot go into itself');
+    if (folders.contains(to)) throw StateError('"$to" already exists');
+    final inside = [for (final n in _notes.values) if (n.folder == from || n.folder.startsWith('$from/')) n];
+    await vault.moveFolder(from, to);
+    for (final n in inside) {
+      _notes.remove(n.path);
+    }
+    final renamed = {for (final f in _folders) f: f == from || f.startsWith('$from/') ? '$to${f.substring(from.length)}' : f};
+    _folders
+      ..clear()
+      ..addAll(renamed.values);
+    await refresh();
+    await _relinkPaths({for (final n in inside) _noExt(n.path): _noExt('$to${n.path.substring(from.length)}')});
+  }
+
+  /// Rename the folder [path] to [name] where it is.
+  Future<String> renameFolder(String path, String name) async {
+    final to = _join(parentOf(path), _cleanName(name));
+    await moveFolder(path, to);
+    return to;
+  }
+
+  /// [[Folder/Note]] links to notes that moved ([moves]: old path -> new, without ".md") made to point at them again.
+  Future<void> _relinkPaths(Map<String, String> moves) async {
+    final pathed = {for (final e in moves.entries) if (e.key.contains('/') && e.key != e.value) e.key: e.value};
+    if (pathed.isEmpty) return;
+    for (final other in [..._notes.values]) {
+      var text = other.text;
+      for (final MapEntry(key: old, value: now) in pathed.entries) {
+        text = text.replaceAllMapped(
+          RegExp(r'(!?)\[\[' + RegExp.escape(old) + r'((?:#[^\[\]|\n]*)?(?:\|[^\[\]\n]*)?)\]\]', caseSensitive: false),
+          (m) => '${m[1]}[[$now${m[2]}]]',
+        );
+      }
+      if (text != other.text) await save(other.path, text);
+    }
+  }
+
+  /// Where deleted notes go, as Obsidian keeps them: a dot-folder in the vault, so nothing is lost at once.
+  static const trashDir = '.trash';
+
+  /// Move [note] to the trash.
+  Future<void> trash(Note note) async {
+    await vault.move(note.file, await _freeInTrash('${note.title}.md'));
+    _notes.remove(note.path);
+    _saveCache();
+    notifyListeners();
+  }
+
+  /// Move the folder [path], with its notes, to the trash.
+  Future<void> trashFolder(String path) async {
+    final to = (await _freeInTrash(path.split('/').last)).replaceFirst(RegExp(r'\.md$'), '');
+    await moveFolder(path, to);
+  }
+
+  /// The notes in the trash, newest first.
+  Future<List<VaultFile>> trashed() async =>
+      (await vault.listIn(trashDir))..sort((a, b) => b.mtime.compareTo(a.mtime));
+
+  /// Put a note from the trash back, at the top of the vault (renamed when the name is taken).
+  Future<Note> restore(VaultFile file) async {
+    final text = await vault.read(file);
+    final base = file.path.split('/').last.replaceFirst(RegExp(r'\.md$'), '');
+    var name = base;
+    for (var n = 2; _notes.containsKey('$name.md'); n++) {
+      name = '$base $n';
+    }
+    final moved = await vault.move(file, '$name.md');
+    final note = Note(file: moved, text: text);
+    _notes[moved.path] = note;
+    _saveCache();
+    notifyListeners();
+    return note;
+  }
+
+  /// Delete a note in the trash for good.
+  Future<void> deleteForever(VaultFile file) => vault.delete(file);
+
+  /// Delete everything in the trash.
+  Future<void> emptyTrash() => vault.deleteFolder(trashDir);
+
+  /// A name in the trash not taken yet: "Note.md", "Note 2.md"...
+  Future<String> _freeInTrash(String name) async {
+    final taken = {for (final f in await vault.listIn(trashDir)) f.path.toLowerCase()};
+    final dot = name.endsWith('.md') ? name.length - 3 : name.length;
+    final base = name.substring(0, dot), ext = name.substring(dot);
+    var candidate = '$trashDir/$name';
+    for (var n = 2; taken.contains(candidate.toLowerCase()) || taken.any((t) => t.startsWith('${candidate.toLowerCase()}/')); n++) {
+      candidate = '$trashDir/$base $n$ext';
+    }
+    return candidate;
+  }
+
+  /// A copy of [note] next to it ("Plan 2").
+  Future<Note> duplicate(Note note) => create(note.title, folder: note.folder, text: note.text);
+
+  static String _noExt(String path) => path.replaceFirst(RegExp(r'\.md$'), '');
+
+  static String _cleanName(String name) {
+    final clean = name.replaceAll(RegExp(r'[\\/:*?"<>|#^\[\]]'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (clean.isEmpty || clean.startsWith('.')) throw StateError('That name cannot be used');
+    return clean;
+  }
 
   /// Notes in Templates/.
   List<Note> get templates => [for (final n in notes) if (n.folder == 'Templates' || n.folder.startsWith('Templates/')) n];
@@ -209,6 +371,10 @@ class Notebook extends ChangeNotifier {
     final file = await vault.write(path, text);
     final note = Note(file: file, text: text);
     _notes[file.path] = note;
+    // Its folders exist now, and stay when the note goes.
+    for (var f = parentOf(file.path); f.isNotEmpty; f = parentOf(f)) {
+      _folders.add(f);
+    }
     _saveCache();
     notifyListeners();
     return note;
@@ -260,6 +426,7 @@ class Notebook extends ChangeNotifier {
     return moved;
   }
 
+  /// Delete [note] for good (the screens move notes to the trash instead: [trash]).
   Future<void> delete(Note note) async {
     await vault.delete(note.file);
     _notes.remove(note.path);
@@ -268,6 +435,9 @@ class Notebook extends ChangeNotifier {
   }
 
   static String _join(String folder, String name) => folder.isEmpty ? name : '$folder/$name';
+
+  /// The folder [path] is in ('' at the top).
+  static String parentOf(String path) => path.contains('/') ? path.substring(0, path.lastIndexOf('/')) : '';
 
   void _loadCache() {
     final file = cache;

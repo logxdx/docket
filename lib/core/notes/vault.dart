@@ -49,6 +49,21 @@ abstract class Vault {
 
   /// The bytes in files whose names end with [suffix] (dot-folders skipped).
   Future<int> bytesOf(String suffix);
+
+  /// Every folder, "Projects/2026" style, empty ones too (dot-folders skipped).
+  Future<List<String>> folders();
+
+  /// Make the folder [path], and its parents.
+  Future<void> makeFolder(String path);
+
+  /// Move the folder [from] to [to] (renamed, or into another folder), with everything in it.
+  Future<void> moveFolder(String from, String to);
+
+  /// Delete the folder [path] and everything in it.
+  Future<void> deleteFolder(String path);
+
+  /// The notes in [folder] (a dot-folder such as .trash, which [list] skips), recursively.
+  Future<List<VaultFile>> listIn(String folder);
 }
 
 class LocalVault implements Vault {
@@ -152,6 +167,43 @@ class LocalVault implements Vault {
     }
     return total;
   }
+
+  @override
+  Future<List<String>> folders() async {
+    if (!await root.exists()) return [];
+    return [
+      await for (final e in root.list(recursive: true, followLinks: false))
+        if (e is Directory && !e.path.substring(root.path.length + 1).split('/').any((s) => s.startsWith('.')))
+          e.path.substring(root.path.length + 1),
+    ]..sort();
+  }
+
+  @override
+  Future<void> makeFolder(String path) => Directory('${root.path}/$path').create(recursive: true);
+
+  @override
+  Future<void> moveFolder(String from, String to) async {
+    final target = Directory('${root.path}/$to');
+    if (target.existsSync()) throw StateError('"$to" already exists');
+    await target.parent.create(recursive: true);
+    await Directory('${root.path}/$from').rename(target.path);
+  }
+
+  @override
+  Future<void> deleteFolder(String path) async {
+    final dir = Directory('${root.path}/$path');
+    if (dir.existsSync()) await dir.delete(recursive: true);
+  }
+
+  @override
+  Future<List<VaultFile>> listIn(String folder) async {
+    final dir = Directory('${root.path}/$folder');
+    if (!dir.existsSync()) return [];
+    return [
+      await for (final e in dir.list(recursive: true, followLinks: false))
+        if (e is File && e.path.endsWith('.md')) _entry(e),
+    ];
+  }
 }
 
 /// Someone's own notes, read but never changed: browse them and ask
@@ -193,6 +245,21 @@ class ReadOnlyVault implements Vault {
 
   @override
   Future<int> bytesOf(String suffix) => inner.bytesOf(suffix);
+
+  @override
+  Future<List<String>> folders() => inner.folders();
+
+  @override
+  Future<void> makeFolder(String path) async => throw const ReadOnlyNotes();
+
+  @override
+  Future<void> moveFolder(String from, String to) async => throw const ReadOnlyNotes();
+
+  @override
+  Future<void> deleteFolder(String path) async => throw const ReadOnlyNotes();
+
+  @override
+  Future<List<VaultFile>> listIn(String folder) => inner.listIn(folder);
 }
 
 class ReadOnlyNotes implements Exception {

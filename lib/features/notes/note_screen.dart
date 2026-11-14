@@ -28,6 +28,7 @@ import '../../core/voice/summaries.dart';
 import '../settings/settings_screen.dart';
 import '../settings/settings_tiles.dart';
 import 'audio_player.dart';
+import 'notes_screen.dart' show pickFolder;
 import 'read_aloud_sheet.dart';
 import 'record_screen.dart';
 import 'spoken_view.dart';
@@ -347,11 +348,11 @@ class _NoteScreenState extends State<NoteScreen> {
     final yes = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete this note?'),
-        content: const Text('The file is deleted from the vault.'),
+        title: const Text('Move this note to the trash?'),
+        content: const Text('It goes to the vault\'s .trash folder, as in Obsidian: restore it from Trash in the notes menu.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Move to trash')),
         ],
       ),
     );
@@ -359,8 +360,25 @@ class _NoteScreenState extends State<NoteScreen> {
     _save?.cancel();
     final note = _book.byPath(_path);
     _saved = _text.text; // nothing left to save on close
-    if (note != null) await _book.delete(note);
+    if (note != null) await _book.trash(note);
     if (mounted) Navigator.pop(context);
+  }
+
+  /// Into another folder; [[links]] to it keep working.
+  Future<void> _move() async {
+    await _flush();
+    if (!mounted) return;
+    final note = _book.byPath(_path);
+    if (note == null) return;
+    final to = await pickFolder(context, _book, title: 'Move "${note.title}" to');
+    if (to == null || to == note.folder) return;
+    try {
+      final moved = await _book.moveNote(_book.byPath(_path)!, to);
+      setState(() => _path = moved.path);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Moved to ${to.isEmpty ? 'the top folder' : to}')));
+    } on StateError catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.message)));
+    }
   }
 
   /// Summarise or tidy with the model server, shown before anything changes.
@@ -538,10 +556,15 @@ class _NoteScreenState extends State<NoteScreen> {
             ),
           if (!readOnly)
             PopupMenuButton<String>(
-              onSelected: (choice) => choice == 'delete' ? _delete() : _rename(),
+              onSelected: (choice) => switch (choice) {
+                'delete' => _delete(),
+                'move' => _move(),
+                _ => _rename(),
+              },
               itemBuilder: (context) => const [
                 PopupMenuItem(value: 'rename', child: Text('Rename')),
-                PopupMenuItem(value: 'delete', child: Text('Delete')),
+                PopupMenuItem(value: 'move', child: Text('Move to folder')),
+                PopupMenuItem(value: 'delete', child: Text('Move to trash')),
               ],
             ),
         ],
@@ -562,7 +585,17 @@ class _NoteScreenState extends State<NoteScreen> {
                     maxLines: null,
                     keyboardType: TextInputType.multiline,
                     textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration.collapsed(hintText: 'Write. [[ links a note, # tags it.'),
+                    // No box (the theme's rounded focus outline clipped the cursor at its corners): the page is the
+                    // editor, as in Obsidian.
+                    decoration: const InputDecoration(
+                      hintText: 'Write. [[ links a note, # tags it.',
+                      isCollapsed: true,
+                      filled: false,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      contentPadding: EdgeInsets.symmetric(vertical: 4),
+                    ),
                   ),
                 ),
               ),
