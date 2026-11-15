@@ -14,16 +14,14 @@ void main() {
     expect(Notebook.isBlank('x'), isFalse);
   });
 
-  test('an empty note deleted for good: gone from the vault, the list and the bookmarks, not in the trash', () async {
+  test('an empty note deleted for good: gone from the vault and the list, not in the trash', () async {
     final dir = Directory.systemTemp.createTempSync('blank');
     addTearDown(() => dir.deleteSync(recursive: true));
     final book = Notebook(LocalVault(dir));
     await book.refresh();
     final note = await book.create('Untitled');
-    await book.toggleBookmark(note);
     await book.deleteNote(note);
     expect(book.notes, isEmpty);
-    expect(book.bookmarked, isEmpty);
     expect(File('${dir.path}/Untitled.md').existsSync(), isFalse);
     expect(await book.trashed(), isEmpty);
   });

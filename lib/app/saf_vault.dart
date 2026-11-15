@@ -158,24 +158,6 @@ class SafVault implements Vault {
   }
 
   @override
-  Future<List<VaultFile>> listFiles(String suffix) async {
-    final out = <VaultFile>[];
-    Future<void> walk(String dir, String prefix, int depth) async {
-      for (final f in await _util.list(dir)) {
-        if (f.name.startsWith('.')) continue;
-        if (f.isDir) {
-          if (depth < 8) await walk(f.uri, '$prefix${f.name}/', depth + 1);
-        } else if (f.name.endsWith(suffix)) {
-          out.add(VaultFile(path: '$prefix${f.name}', uri: f.uri, mtime: f.lastModified, size: f.length));
-        }
-      }
-    }
-
-    await walk(treeUri, '', 0);
-    return out;
-  }
-
-  @override
   Future<Uint8List?> readBytes(String path) async {
     final file = await _util.child(treeUri, path.split('/'));
     return file == null || file.isDir ? null : _stream.readFileBytes(file.uri);
@@ -188,7 +170,7 @@ class SafVault implements Vault {
       for (final f in await _util.list(dir)) {
         if (f.isDir) {
           if (depth < 8) await walk(f.uri, '$prefix${f.name}/', depth + 1);
-        } else if (Vault.kept(f.name)) {
+        } else if (f.name.endsWith('.md')) {
           out.add(VaultFile(path: '$prefix${f.name}', uri: f.uri, mtime: f.lastModified, size: f.length));
         }
       }

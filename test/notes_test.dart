@@ -11,11 +11,6 @@ void main() {
     expect(parseLinks(text), ['Project X', 'Daily/2026-10-24']);
     expect(parseTags(text), {'x', 'idea', 'work/q4'});
     expect(fileName('What: a/b?'), 'What a b');
-    expect(applyTemplate('# {{title}} on {{date}} {{time}}', title: 'T', now: DateTime(2026, 10, 24, 9, 5)),
-        '# T on 2026-10-24 09:05');
-    expect(applyTemplate('{{date:dddd, MMMM Do YYYY}} {{time:h:mm A}} w{{date:ww}} [{{date:[Q]Q}}]', title: 'T',
-            now: DateTime(2026, 10, 24, 21, 5)),
-        'Saturday, October 24th 2026 9:05 PM w43 [Q4]');
   });
 
   test('a placeholder title gives way to the heading or first line', () {
@@ -75,16 +70,12 @@ void main() {
       expect((await book.rename(b, 'Plans 2027')).text, b.text);
     });
 
-    test('templates and daily notes', () async {
-      await book.save('Templates/Daily.md', '# {{date}}\n\n## Plans\n');
-      await book.save('Templates/Meeting.md', '# {{title}}\nAttendees:\n');
+    test('daily notes', () async {
       final day = await book.daily(DateTime(2026, 10, 24, 8));
       expect(day.path, 'Daily/2026-10-24.md');
-      expect(day.text, '# 2026-10-24\n\n## Plans\n');
+      expect(day.text, '# 2026-10-24\n\n');
       expect((await book.daily(DateTime(2026, 10, 24, 20))).path, day.path);
-      final meeting = await book.create('Standup', template: book.templates.firstWhere((t) => t.title == 'Meeting'));
-      expect(meeting.text, '# Standup\nAttendees:\n');
-      expect(book.folders, ['Daily', 'Templates']);
+      expect(book.folders, ['Daily']);
     });
 
     test('read only: browsed and searched, never changed', () async {
@@ -174,32 +165,6 @@ void main() {
       await book.moveFolder('Job/Q4', 'Archive/Q4');
       expect(book.byPath('Archive/Q4/Plan.md'), isNotNull);
       expect(() => book.moveFolder('Archive', 'Archive/Q4/Archive'), throwsStateError);
-    });
-
-    test('bookmarks: in Obsidian\'s file, other items kept, following moves, gone with the note', () async {
-      File('${dir.path}/.obsidian/bookmarks.json')
-        ..createSync(recursive: true)
-        ..writeAsStringSync('{"items":[{"type":"search","query":"tag:#work"},{"type":"group","title":"G","items":[{"type":"file","path":"Plan.md"}]}]}');
-      final plan = await book.create('Plan', text: 'x');
-      final other = await book.create('Other', text: 'y');
-      await book.refresh();
-      expect(book.bookmarked.map((n) => n.title), ['Plan']);
-      await book.toggleBookmark(other);
-      expect(book.isBookmarked(book.byPath('Other.md')!), isTrue);
-      await book.moveNote(book.byPath('Plan.md')!, 'Work');
-      expect(book.bookmarks.files, ['Work/Plan.md', 'Other.md']);
-      await book.rename(book.byPath('Other.md')!, 'Else');
-      expect(book.bookmarks.files, ['Work/Plan.md', 'Else.md']);
-      await book.trash(book.byPath('Else.md')!);
-      expect(book.bookmarks.files, ['Work/Plan.md']);
-      // Obsidian's own items are still there, and the file is the vault's.
-      final saved = File('${dir.path}/.obsidian/bookmarks.json').readAsStringSync();
-      expect(saved, contains('"query": "tag:#work"'));
-      expect(saved, contains('"title": "G"'));
-      final again = Notebook(LocalVault(dir));
-      await again.refresh();
-      expect(again.bookmarks.files, ['Work/Plan.md']);
-      expect(plan.title, 'Plan');
     });
 
     test('unlinked mentions: the title as a word, in notes not linking to it', () async {

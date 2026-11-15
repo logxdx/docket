@@ -4,9 +4,7 @@
 /// - a title, for a note still under a placeholder name ("Untitled",
 ///   "Recording 2026-11-14 0905"), never over a name the user gave;
 /// - a description, from the same model, in the note's front matter;
-/// - topic tags, in the front matter's `tags:`, for a note that has none yet;
-/// - an emoji at the start of a task ("- [ ] 🦷 Dentist appointment") and of
-///   a timed entry on a daily note, the calendar ("- 14:00 🏋️ Gym").
+/// - topic tags, in the front matter's `tags:`, for a note that has none yet.
 library;
 
 import 'properties.dart';
@@ -61,58 +59,6 @@ String heuristicTitle(String prose) {
   if (words.isEmpty) return '';
   final title = words.take(8).join(' ').replaceAll(RegExp(r'[\s,.;:!?…]+$'), '');
   return title.isEmpty ? '' : '${title[0].toUpperCase()}${title.substring(1)}';
-}
-
-/// A line that wants an emoji: [line] its index, [at] where the emoji goes,
-/// [phrase] what to ask Emo about, [was] the line as it was when asked.
-typedef EmojiSpot = ({int line, int at, String phrase, String was});
-
-final _taskLine = RegExp(r'^(\s*[-*+] \[[ xX]\] )(.*)$');
-final _timedEntry = RegExp(r'^(\s*[-*+] (?:\[[ xX]\] )?)(\d{1,2}[:.]\d{2}(?:\s*[-–]\s*\d{1,2}[:.]\d{2})?\s+)(.*)$');
-final _startsWithEmoji = RegExp(r'^\s*\p{Extended_Pictographic}', unicode: true);
-
-/// Whether [s] already starts with an emoji.
-bool startsWithEmoji(String s) => _startsWithEmoji.hasMatch(s);
-
-/// The tasks in [text] (and, on a daily note, its timed entries) that have
-/// no emoji yet, outside code.
-List<EmojiSpot> emojiSpots(String text, {required bool daily}) {
-  final spots = <EmojiSpot>[];
-  final lines = text.split('\n');
-  var inCode = false;
-  for (var i = 0; i < lines.length; i++) {
-    final l = lines[i];
-    if (l.trimLeft().startsWith('```')) inCode = !inCode;
-    if (inCode) continue;
-    if (daily) {
-      final m = _timedEntry.firstMatch(l);
-      if (m != null) {
-        final rest = m[3]!;
-        if (rest.trim().length >= 3 && !startsWithEmoji(rest)) {
-          spots.add((line: i, at: m[1]!.length + m[2]!.length, phrase: rest.trim(), was: l));
-        }
-        continue;
-      }
-    }
-    final t = _taskLine.firstMatch(l);
-    if (t != null) {
-      final rest = t[2]!;
-      // A to-do of a recording's summary is "who: what": the emoji is for the what.
-      if (rest.trim().length >= 3 && !startsWithEmoji(rest)) {
-        spots.add((line: i, at: t[1]!.length, phrase: rest.trim(), was: l));
-      }
-    }
-  }
-  return spots;
-}
-
-/// [text] with [emoji] put at [spot], if that line is still as it was.
-String withEmoji(String text, EmojiSpot spot, String emoji) {
-  final lines = text.split('\n');
-  if (spot.line >= lines.length || lines[spot.line] != spot.was) return text;
-  final l = lines[spot.line];
-  lines[spot.line] = '${l.substring(0, spot.at)}$emoji ${l.substring(spot.at)}';
-  return lines.join('\n');
 }
 
 /// [text] with its first "# heading" (if it is [old], or the note has no

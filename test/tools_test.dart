@@ -5,7 +5,6 @@ import 'package:notes_app/core/notes/moment.dart';
 import 'package:notes_app/core/notes/notebook.dart';
 import 'package:notes_app/core/notes/obsidian.dart';
 import 'package:notes_app/core/notes/properties.dart';
-import 'package:notes_app/core/notes/recovery.dart';
 import 'package:notes_app/core/notes/vault.dart';
 
 void main() {
@@ -44,22 +43,18 @@ void main() {
     late Notebook book;
     setUp(() {
       dir = Directory.systemTemp.createTempSync('notes_tools');
-      book = Notebook(LocalVault(Directory('${dir.path}/vault')), snapshots: Snapshots(Directory('${dir.path}/snap')));
+      book = Notebook(LocalVault(Directory('${dir.path}/vault')));
     });
     tearDown(() => dir.deleteSync(recursive: true));
 
-    test('daily notes by their settings, and the ones before and after', () async {
+    test('daily notes by their settings', () async {
       book
         ..dailyFolder = 'Journal'
         ..dailyFormat = 'YYYY/MM-MMMM/YYYY-MM-DD dddd';
-      await book.save('Templates/Day.md', '# {{date:dddd}}\n');
-      book.dailyTemplate = 'Templates/Day';
       final d = await book.daily(DateTime(2026, 11, 14));
       expect(d.path, 'Journal/2026/11-November/2026-11-14 Saturday.md');
-      expect(d.text, '# Saturday\n');
-      final e = await book.daily(DateTime(2026, 11, 15));
-      expect(book.adjacentDaily(e, -1)?.path, d.path);
-      expect(book.adjacentDaily(e, 1), isNull);
+      expect(d.text, '# 2026-11-14 Saturday\n\n');
+      expect((await book.daily(DateTime(2026, 11, 14))).path, d.path, reason: 'made once');
     });
 
     test('aliases name a note for links', () async {
@@ -67,42 +62,34 @@ void main() {
       expect(book.byTitle('Money')?.title, 'Quarterly budget');
     });
 
-    test('merge and extract, links following', () async {
-      final a = await book.create('Ideas', text: '---\ntags: [x]\n---\nIdea one.');
-      final b = await book.create('Plans', text: 'Plan one.');
-      await book.create('Index', text: 'See [[Ideas]] and ![[Ideas#One]].');
-      final merged = await book.merge(a, b);
-      expect(merged.text, 'Plan one.\n\nIdea one.\n');
-      expect(book.byPath('Index.md')!.text, 'See [[Plans]] and ![[Plans#One]].');
-      expect(book.byPath('Ideas.md'), isNull);
+    test('archive: notes and folders out of the lists, links still working, and back where they were', () async {
+      final plan = await book.create('Plan', folder: 'Work', text: 'zebra');
+      await book.create('Old', folder: 'Work/2025', text: 'y');
+      await book.create('Index', text: 'See [[Plan]] and [[Work/Plan]].');
+      final archived = await book.archive(plan);
+      expect(archived.path, 'Archive/Work/Plan.md');
+      expect(book.notes.map((n) => n.title), isNot(contains('Plan')));
+      expect(book.search('zebra'), isEmpty);
+      expect(book.byTitle('Plan')?.path, 'Archive/Work/Plan.md', reason: '[[Plan]] still leads to it');
+      expect(book.byPath('Index.md')!.text, 'See [[Plan]] and [[Archive/Work/Plan]].');
+      expect(book.folders, isNot(contains('Archive')));
 
-      final made = await book.extract(book.byPath('Plans.md')!, 11, 20, 'Idea');
-      expect(made.text, 'Idea one.\n');
-      expect(book.byPath('Plans.md')!.text, 'Plan one.\n\n[[Idea]]\n');
-    });
+      final folder = await book.archiveFolder('Work/2025');
+      expect(folder, 'Archive/Work/2025');
+      expect(book.archivedFoldersIn('Archive/Work'), ['Archive/Work/2025']);
+      expect(book.archivedNotesIn('Archive/Work').map((n) => n.title), ['Plan']);
+      expect(book.hasArchive, isTrue);
 
-    test('unique notes are named by the time', () async {
-      final n = await book.createUnique(now: DateTime(2026, 11, 14, 9, 5));
-      expect(n.title, '202611140905');
-      expect((await book.createUnique(now: DateTime(2026, 11, 14, 9, 5))).title, '202611140905 2');
-    });
-
-    test('file recovery keeps earlier versions, follows renames, and drops the oldest', () async {
-      final shots = Snapshots(Directory('${dir.path}/s2'), every: Duration.zero, keep: 3);
-      final b2 = Notebook(LocalVault(Directory('${dir.path}/v2')), snapshots: shots);
-      final n = await b2.create('Plan', text: 'v1');
-      for (final v in ['v2', 'v3', 'v4', 'v5']) {
-        await b2.save(n.path, v);
-      }
-      expect([for (final s in shots.of('Plan.md')) s.file.readAsStringSync()], ['v4', 'v3', 'v2']);
-      await b2.rename(b2.byPath('Plan.md')!, 'Plan B');
-      expect(shots.of('Plan B.md').length, 3);
-      // Within the interval, no new copy.
-      final slow = Snapshots(Directory('${dir.path}/s3'));
-      slow.take('x.md', 'a', now: DateTime(2026));
-      slow.take('x.md', 'b', now: DateTime(2026, 1, 1, 0, 2));
-      slow.take('x.md', 'c', now: DateTime(2026, 1, 1, 0, 10));
-      expect([for (final s in slow.of('x.md')) s.file.readAsStringSync()], ['c', 'a']);
+      // A note of that name made meanwhile: the one coming back is "Plan 2".
+      await book.create('Plan', folder: 'Work', text: 'new');
+      final back = await book.unarchive(book.byPath('Archive/Work/Plan.md')!);
+      expect(back.path, 'Work/Plan 2.md');
+      expect(await book.unarchiveFolder('Archive/Work/2025'), 'Work/2025');
+      expect(book.byPath('Work/2025/Old.md'), isNotNull);
+      // Archived again with the same name there: numbered, not lost.
+      await book.archive(book.byPath('Work/Plan.md')!);
+      await book.archive(book.byPath('Work/Plan 2.md')!);
+      expect(book.archivedNotesIn('Archive/Work').map((n) => n.title), ['Plan', 'Plan 2']);
     });
   });
 }

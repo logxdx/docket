@@ -53,7 +53,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _Group('Smart notes', [
               _Switch('Title new notes', _s.autoEnabled('title'), (on) => setState(() => _s.setAutoEnabled('title', on))),
               _Switch('Tag topics', _s.autoEnabled('tags'), (on) => setState(() => _s.setAutoEnabled('tags', on))),
-              _Switch('Emoji on tasks', _s.autoEnabled('emoji'), (on) => setState(() => _s.setAutoEnabled('emoji', on))),
             ]),
             if (status.speech)
               _Group('Read aloud', [
@@ -63,8 +62,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _Row('Daily notes',
                   value: _s.notebook.dailyFolder.isEmpty ? _s.notebook.dailyFormat : '${_s.notebook.dailyFolder}/${_s.notebook.dailyFormat}',
                   onTap: _dailySettings),
-              _Row('Templates folder', value: _s.notebook.templatesFolder, onTap: () => _ask('notes.templates', 'Templates folder',
-                  _s.notebook.templatesFolder, 'Notes in this folder are templates ({{title}}, {{date}}, {{date:FORMAT}}, {{time}}).')),
               _Row('Pictures go in', value: _s.attachmentsFolder.isEmpty ? 'The note\'s folder' : _s.attachmentsFolder,
                   onTap: () => _ask('notes.attachments', 'Pictures go in', _s.attachmentsFolder,
                       'A folder for pictures added to notes; empty: next to the note.')),
@@ -123,16 +120,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() {});
   }
 
-  /// Daily notes as Obsidian's plugin sets them: folder, name format (Moment), template.
-  /// One dialog for all three; Cancel leaves them as they were.
+  /// Daily notes as Obsidian's plugin sets them: folder and name format (Moment), in one dialog; Cancel leaves them
+  /// as they were.
   Future<void> _dailySettings() async {
     final book = _s.notebook;
     final fields = [
       ('daily.folder', 'Folder', book.dailyFolder, 'Where daily notes go; empty: the top folder.'),
       ('daily.format', 'Name', book.dailyFormat,
           'A date format, as in Obsidian: YYYY-MM-DD, dddd D MMMM YYYY, YYYY/MM/YYYY-MM-DD (folders by month)…'),
-      ('daily.template', 'Template', book.dailyTemplate,
-          'A template\'s name or path, such as Templates/Daily; empty: the template called "Daily", if there is one.'),
     ];
     final controllers = [for (final f in fields) TextEditingController(text: f.$3)];
     final saved = await showDialog<bool>(
@@ -856,7 +851,7 @@ class _AboutScreen extends StatelessWidget {
               style: theme.textTheme.bodySmall?.copyWith(color: muted)),
         ),
         _Group('On-device AI', [
-          credit('Desert Ant Labs', 'Clear, Ear, Voz, Who, Align, Title, Gist, Emo', 'https://desertant.com'),
+          credit('Desert Ant Labs', 'Clear, Ear, Voz, Who, Align, Title, Gist', 'https://desertant.com'),
           credit('Fermion Research · Phonon-2.5', 'CC BY 4.0, from NVIDIA Parakeet-TDT',
               'https://huggingface.co/FermionResearch/Phonon-2.5'),
           credit('Gradium · Phonon voice', 'Apache-2.0', 'https://huggingface.co/gradium/phonon-31m-en'),

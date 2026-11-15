@@ -12,9 +12,14 @@ flutter build apk --debug
 ```
 
 ## What it does
-- **Notes** (`lib/core/notes/`): Markdown files in a vault: `[[links]]` (with
-  `|alias` and `#heading`), `#tags`, `Daily/` and `Templates/`, backlinks,
-  search, renames that update links, and an index cached between runs.
+- **Notes** (`lib/core/notes/`): Markdown files in a vault, read as Obsidian
+  reads them: `[[links]]` (with `|alias`, `#heading` and `^block`), embeds,
+  callouts, footnotes, `==highlights==`, `%%comments%%`, math, tables,
+  properties (YAML front matter, aliases too) and `#tags`; folders, daily
+  notes, backlinks and unlinked mentions, search with Obsidian's operators,
+  the quick switcher, the tags view, renames and moves that update links, an
+  `Archive/` (out of the lists and search, links still working) and a
+  `.trash/` (as Obsidian keeps it), and an index cached between runs.
 - **Where they live**: `Notes/` in the app's own folder, or (Android) a folder
   you pick through the Storage Access Framework, such as your Obsidian vault,
   editable or read only (`lib/app/saf_vault.dart`).
@@ -44,9 +49,8 @@ flutter build apk --debug
      `tags` (**Gist**).
   Saving is instant; a recording interrupted by the app closing carries on
   at the next start. With a model server set (Settings › AI), a summary is written too.
-- **Typed notes**, as they are saved (`lib/app/enricher.dart`): an emoji on
-  each task and each timed entry of a daily note (**Emo**: "- [ ] 🦷
-  Dentist"), and front matter (`lib/core/notes/properties.dart`): topic
+- **Typed notes**, as they are saved (`lib/app/enricher.dart`): front matter
+  (`lib/core/notes/properties.dart`): topic
   `tags` for a note with none (**Gist**), a `description` for one without
   (**Title**, from 12 words on; delete it to have it written again, empty it
   to keep none), and a `title` for one still called "Untitled" (**Title**,
@@ -60,7 +64,7 @@ flutter build apk --debug
   job's prompt is a short role and a short task, editable (Settings › AI ›
   Prompts) with a warning and a confirmation; Reset restores it. No language
   model runs on the phone: the ones a phone can hold changed facts on these
-  jobs, and lost to Title, Gist and Emo on titles, tags and emoji
+  jobs, and lost to Title and Gist on titles and tags
   (`tool/language_models.md`).
 
 ## Offline, on the phone

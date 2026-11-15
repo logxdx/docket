@@ -1,18 +1,17 @@
 /// The notes, as Obsidian's file explorer has them: a vault of Markdown files
 /// (the app's own folder, or a picked one such as an Obsidian vault) browsed
 /// folder by folder, or all at once, searched and filtered by tag. A long
-/// press selects notes and folders to move, rename, duplicate or put in the
-/// trash; the menu makes folders, sorts, and opens the trash.
+/// press selects notes and folders to move, rename, duplicate, archive or put
+/// in the trash; the menu makes folders, sorts, and opens the archive and the
+/// trash.
 library;
 
 import 'package:flutter/material.dart';
 
 import '../../app/services.dart';
 import '../../app/theme.dart';
-import '../../core/notes/bases.dart';
 import '../../core/notes/notebook.dart';
 import '../../core/notes/search.dart';
-import '../../core/notes/vault.dart';
 import '../settings/settings_screen.dart';
 import '../settings/settings_tiles.dart';
 import 'graph_screen.dart';
@@ -20,8 +19,8 @@ import 'navigation.dart';
 import 'note_tools.dart';
 import 'note_screen.dart';
 import 'record_screen.dart';
+import 'archive_screen.dart';
 import 'trash_screen.dart';
-import 'views_screens.dart';
 
 class NotesScreen extends StatefulWidget {
   const NotesScreen({super.key});
@@ -44,15 +43,15 @@ class _NotesScreenState extends State<NotesScreen> {
   late final Services _s = ServicesScope.of(context);
   Notebook get _book => _s.notebook;
 
-  /// 'folders' (the default), 'all' or 'bookmarks'.
-  String get _view => _s.settings.get('notes.view') ?? 'folders';
+  /// 'folders' (the default) or 'all'.
+  String get _view => _s.settings.get('notes.view') == 'all' ? 'all' : 'folders';
 
   /// 'modified' (the default) or 'name'.
   String get _sort => _s.settings.get('notes.sort') ?? 'modified';
 
   bool get _selecting => _selected.isNotEmpty;
 
-  /// Searching, filtering by tag, or the All notes or Bookmarks view: one flat list.
+  /// Searching, filtering by tag, or the All notes view: one flat list.
   bool get _flat => _query.text.trim().isNotEmpty || _tag != null || _view != 'folders';
 
   @override
@@ -85,37 +84,7 @@ class _NotesScreenState extends State<NotesScreen> {
       : notes;
 
   Future<void> _new() async {
-    final templates = _book.templates;
-    Note? template;
-    if (templates.isNotEmpty) {
-      final choice = await showModalBottomSheet<Object>(
-        context: context,
-        showDragHandle: true,
-        builder: (context) => SafeArea(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            SettingsRow(
-              tile: Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(color: Accent.of(context), borderRadius: BorderRadius.circular(12)),
-                alignment: Alignment.center,
-                child: Icon(Icons.note_add_outlined, size: 20, color: Accent.onOf(context)),
-              ),
-              title: 'Blank note',
-              chevron: false,
-              onTap: () => Navigator.pop(context, 'blank'),
-            ),
-            for (final t in templates) ...[
-              _hairline(context),
-              SettingsRow(icon: Icons.description_outlined, title: t.title, chevron: false, onTap: () => Navigator.pop(context, t)),
-            ],
-          ]),
-        ),
-      );
-      if (choice == null) return;
-      if (choice is Note) template = choice;
-    }
-    final note = await _book.create('Untitled', folder: _flat ? '' : _folder, template: template);
+    final note = await _book.create('Untitled', folder: _flat ? '' : _folder);
     if (mounted) await _open(note, edit: true);
   }
 
@@ -209,6 +178,26 @@ class _NotesScreenState extends State<NotesScreen> {
     _say('Moved ${notes + folders.length} to the trash');
   }
 
+  /// The selected notes and folders into the archive: out of the way, kept; back from Archive in the menu.
+  Future<void> _archiveSelected() async {
+    final count = _selected.length;
+    final label = _countLabel();
+    final problems = <String>[];
+    for (final item in [..._selected]) {
+      try {
+        if (item.folder) {
+          await _book.archiveFolder(item.path);
+        } else if (_book.byPath(item.path) case final note?) {
+          await _book.archive(note);
+        }
+      } on StateError catch (e) {
+        problems.add(e.message);
+      }
+    }
+    setState(_selected.clear);
+    _say(problems.isNotEmpty ? problems.first : count == 1 ? '${label[0].toUpperCase()}${label.substring(1)} is archived' : 'Archived $count items');
+  }
+
   Future<void> _renameSelected() async {
     final item = _selected.single;
     final old = item.path.split('/').last.replaceFirst(RegExp(r'\.md$'), '');
@@ -248,12 +237,10 @@ class _NotesScreenState extends State<NotesScreen> {
         await _newFolder();
       case 'sort-name' || 'sort-modified':
         _s.settings.set('notes.sort', choice.substring(5));
-      case 'view-all' || 'view-folders' || 'view-bookmarks':
+      case 'view-all' || 'view-folders':
         _s.settings.set('notes.view', choice.substring(5));
       case 'switcher':
         await _switcher();
-      case 'commands':
-        await _palette();
       case 'random':
         if (_book.random() case final n?) await _open(n);
       case 'tags':
@@ -262,118 +249,21 @@ class _NotesScreenState extends State<NotesScreen> {
           _tag = tag;
           _selected.clear();
         }
-      case 'canvas' || 'base':
-        await _newFile(choice);
-      case 'properties':
-        final search = await Navigator.push<String>(context, MaterialPageRoute(builder: (_) => PropertiesScreen(book: _book)));
-        if (search != null) {
-          _query.text = search;
-          _selected.clear();
-        }
-      case 'unique':
-        final note = await _book.createUnique(folder: _flat ? '' : _folder);
-        if (mounted) await _open(note, edit: true);
       case 'graph':
         await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const GraphScreen()));
       case 'vault':
         await _vault();
+      case 'archive':
+        await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const ArchiveScreen()));
       case 'trash':
         await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const TrashScreen()));
     }
     if (mounted) setState(() {});
   }
 
-  /// A new canvas or base in the folder being looked at, opened.
-  Future<void> _newFile(String kind) async {
-    final canvas = kind == 'canvas';
-    final name = await _askName(canvas ? 'New canvas' : 'New base', 'Create');
-    if (name == null || name.trim().isEmpty) return;
-    final file = await _book.createFile(
-        _flat ? '' : _folder, name, canvas ? '.canvas' : '.base', canvas ? '{"nodes":[],"edges":[]}' : newBaseText);
-    if (mounted) _openFile(file);
-  }
-
-  /// Rename, move or trash a canvas or base.
-  Future<void> _manageFile(VaultFile f) async {
-    final name = f.path.split('/').last.replaceFirst(RegExp(r'\.(canvas|base)$'), '');
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(title: Text(name, style: Theme.of(context).textTheme.titleMedium)),
-          ListTile(leading: const Icon(Icons.drive_file_rename_outline_rounded), title: const Text('Rename'),
-              onTap: () => Navigator.pop(context, 'rename')),
-          ListTile(leading: const Icon(Icons.drive_file_move_outlined), title: const Text('Move to folder'),
-              onTap: () => Navigator.pop(context, 'move')),
-          ListTile(leading: const Icon(Icons.delete_outline_rounded), title: const Text('Move to trash'),
-              onTap: () => Navigator.pop(context, 'trash')),
-        ]),
-      ),
-    );
-    if (!mounted || choice == null) return;
-    try {
-      switch (choice) {
-        case 'rename':
-          final to = await _askName('Rename', 'Rename', initial: name);
-          if (to != null && to.trim().isNotEmpty) await _book.moveFile(f, name: to);
-        case 'move':
-          final to = await pickFolder(context, _book, title: 'Move "$name" to');
-          if (to != null) {
-            await _book.moveFile(f, folder: to);
-            _say('Moved to ${to.isEmpty ? 'the top folder' : to}');
-          }
-        case 'trash':
-          await _book.trashFile(f);
-          _say('"$name" moved to the trash');
-      }
-    } on StateError catch (e) {
-      _say(e.message);
-    }
-  }
-
-  void _openFile(VaultFile f) => Navigator.push(
-        context,
-        MaterialPageRoute<void>(builder: (_) => f.path.endsWith('.canvas') ? CanvasScreen(file: f) : BaseScreen(file: f)),
-      );
-
   Future<void> _switcher() async {
     final note = await showQuickSwitcher(context, book: _book, recent: _s.recent);
     if (note != null && mounted) await _open(note);
-  }
-
-  /// Every action on the notes, by name.
-  Future<void> _palette() async {
-    final readOnly = _book.readOnly;
-    await showCommandPalette(context, [
-      Command('Open a note…', Icons.search_rounded, _switcher),
-      if (!readOnly) ...[
-        Command('New note', Icons.note_add_outlined, _new),
-        Command('New folder', Icons.create_new_folder_outlined, _newFolder),
-        Command('New unique note', Icons.fiber_new_outlined, () => _menu('unique')),
-        Command('New canvas', Icons.dashboard_customize_outlined, () => _menu('canvas')),
-        Command('New base', Icons.table_chart_outlined, () => _menu('base')),
-        Command("Today's note", Icons.today_rounded, () async {
-          final note = await _book.daily();
-          if (mounted) await _open(note, edit: true);
-        }),
-        Command('Record and transcribe', Icons.mic_none_rounded,
-            () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const RecordScreen()))),
-      ],
-      Command('Random note', Icons.casino_outlined, () => _menu('random')),
-      Command('Show bookmarks', Icons.bookmarks_outlined, () => _menu('view-bookmarks')),
-      Command('Tags', Icons.tag_rounded, () => _menu('tags')),
-      Command('All properties', Icons.tune_rounded, () => _menu('properties')),
-      Command('Show folders', Icons.folder_outlined, () => _menu('view-folders')),
-      Command('Show all notes', Icons.notes_rounded, () => _menu('view-all')),
-      Command('Sort by name', Icons.sort_by_alpha_rounded, () => _menu('sort-name')),
-      Command('Sort by recently changed', Icons.schedule_rounded, () => _menu('sort-modified')),
-      Command('Graph of links', Icons.hub_outlined, () => _menu('graph')),
-      if (!readOnly) Command('Trash', Icons.delete_outline_rounded, () => _menu('trash')),
-      Command('Where notes are kept', Icons.folder_special_outlined, () => _menu('vault')),
-      Command('Settings', Icons.settings_outlined,
-          () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const SettingsScreen()))),
-    ]);
   }
 
   Future<void> _vault() async {
@@ -391,7 +281,7 @@ class _NotesScreenState extends State<NotesScreen> {
               Text('Notes are in ${local ? 'this app' : services.notebook.vault.label}',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w500)),
               const SizedBox(height: 4),
-              Text('Plain Markdown files in folders: [[links]], #tags, Daily/ and Templates/ like Obsidian.',
+              Text('Plain Markdown files in folders: [[links]], #tags, Daily/ and Archive/ like Obsidian.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant, height: 1.45)),
             ]),
           ),
@@ -492,6 +382,7 @@ class _NotesScreenState extends State<NotesScreen> {
         actions: [
           IconButton(tooltip: 'Select all', icon: const Icon(Icons.select_all_rounded), onPressed: () => _selectAll(shown)),
           IconButton(tooltip: 'Move to folder', icon: const Icon(Icons.drive_file_move_outlined), onPressed: _moveSelected),
+          IconButton(tooltip: 'Archive', icon: const Icon(Icons.archive_outlined), onPressed: _archiveSelected),
           IconButton(tooltip: 'Move to trash', icon: const Icon(Icons.delete_outline_rounded), onPressed: _trashSelected),
           if (single != null)
             PopupMenuButton<String>(
@@ -540,17 +431,12 @@ class _NotesScreenState extends State<NotesScreen> {
           onSelected: _menu,
           itemBuilder: (context) => [
             const PopupMenuItem(value: 'switcher', child: ListTile(leading: Icon(Icons.search_rounded), title: Text('Open a note…'))),
-            const PopupMenuItem(value: 'commands', child: ListTile(leading: Icon(Icons.terminal_rounded), title: Text('Command palette'))),
             if (!readOnly) const PopupMenuItem(value: 'folder', child: ListTile(leading: Icon(Icons.create_new_folder_outlined), title: Text('New folder'))),
-            if (!readOnly) const PopupMenuItem(value: 'canvas', child: ListTile(leading: Icon(Icons.dashboard_customize_outlined), title: Text('New canvas'))),
-            if (!readOnly) const PopupMenuItem(value: 'base', child: ListTile(leading: Icon(Icons.table_chart_outlined), title: Text('New base'))),
             const PopupMenuItem(value: 'random', child: ListTile(leading: Icon(Icons.casino_outlined), title: Text('Random note'))),
             const PopupMenuItem(value: 'tags', child: ListTile(leading: Icon(Icons.tag_rounded), title: Text('Tags'))),
-            const PopupMenuItem(value: 'properties', child: ListTile(leading: Icon(Icons.tune_rounded), title: Text('All properties'))),
             const PopupMenuDivider(),
             CheckedPopupMenuItem(value: 'view-folders', checked: _view == 'folders', child: const Text('Folders')),
             CheckedPopupMenuItem(value: 'view-all', checked: _view == 'all', child: const Text('All notes')),
-            CheckedPopupMenuItem(value: 'view-bookmarks', checked: _view == 'bookmarks', child: const Text('Bookmarks')),
             const PopupMenuDivider(),
             CheckedPopupMenuItem(value: 'sort-modified', checked: _sort == 'modified', child: const Text('Recently changed first')),
             CheckedPopupMenuItem(value: 'sort-name', checked: _sort == 'name', child: const Text('By name')),
@@ -563,6 +449,7 @@ class _NotesScreenState extends State<NotesScreen> {
                 title: const Text('Where notes are kept'),
               ),
             ),
+            if (!readOnly) const PopupMenuItem(value: 'archive', child: ListTile(leading: Icon(Icons.archive_outlined), title: Text('Archive'))),
             if (!readOnly) const PopupMenuItem(value: 'trash', child: ListTile(leading: Icon(Icons.delete_outline_rounded), title: Text('Trash'))),
           ],
         ),
@@ -581,17 +468,15 @@ class _NotesScreenState extends State<NotesScreen> {
         if (_folder.isNotEmpty && !_book.folders.contains(_folder)) _folder = '';
         final List<String> folders;
         final List<Note> notes;
-        var others = const <VaultFile>[];
         final searching = _query.text.trim().isNotEmpty;
         if (_flat) {
           folders = const [];
-          var found = _view == 'bookmarks' && !searching ? _book.bookmarked : _book.search(_query.text);
+          var found = _book.search(_query.text);
           if (_tag != null) found = [for (final n in found) if (n.tags.contains(_tag)) n];
-          notes = searching || _view == 'bookmarks' ? found : _sorted(found);
+          notes = searching ? found : _sorted(found);
         } else {
           folders = _book.subfolders(_folder);
           notes = _sorted(_book.notesIn(_folder));
-          others = [..._book.othersIn(_folder)]..sort((a, b) => a.path.toLowerCase().compareTo(b.path.toLowerCase()));
         }
         final shown = <_Item>[
           for (final f in folders) (folder: true, path: f),
@@ -670,7 +555,7 @@ class _NotesScreenState extends State<NotesScreen> {
               if (!_flat && _folder.isNotEmpty) _Breadcrumb(folder: _folder, onGo: _go),
               if (_book.loading) const LinearProgressIndicator(minHeight: 2),
               Expanded(
-                child: shown.isEmpty && others.isEmpty
+                child: shown.isEmpty
                     ? Center(
                         child: Padding(
                           padding: const EdgeInsets.all(32),
@@ -679,9 +564,7 @@ class _NotesScreenState extends State<NotesScreen> {
                                 ? readOnly
                                     ? 'No Markdown notes in this folder.'
                                     : 'No notes yet. Write one, open today\'s note, or record one.'
-                                : _view == 'bookmarks' && !searching && _tag == null
-                                    ? 'No bookmarks yet: bookmark a note from its menu.'
-                                    : _flat
+                                : _flat
                                     ? 'Nothing matches.'
                                     : 'This folder is empty.',
                             textAlign: TextAlign.center,
@@ -691,20 +574,10 @@ class _NotesScreenState extends State<NotesScreen> {
                       )
                     : ListView.separated(
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-                        itemCount: shown.length + others.length,
+                        itemCount: shown.length,
                         separatorBuilder: (_, _) => const SizedBox(height: 10),
-                        itemBuilder: (context, at) {
-                          // Folders, then canvases and bases, then notes.
-                          final other = at - folders.length;
-                          if (other >= 0 && other < others.length) {
-                            final f = others[other];
-                            return _FileCard(
-                              file: f,
-                              onTap: _selecting ? null : () => _openFile(f),
-                              onLongPress: readOnly || _selecting ? null : () => _manageFile(f),
-                            );
-                          }
-                          final item = shown[other < 0 ? at : at - others.length];
+                        itemBuilder: (context, i) {
+                          final item = shown[i];
                           final selected = _selected.contains(item);
                           void tap() {
                             if (_selecting) {
@@ -846,41 +719,6 @@ class _FolderCard extends StatelessWidget {
               ]),
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A canvas or a base, opened in its own view.
-class _FileCard extends StatelessWidget {
-  const _FileCard({required this.file, required this.onTap, required this.onLongPress});
-
-  final VaultFile file;
-  final VoidCallback? onTap;
-  final VoidCallback? onLongPress;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final canvas = file.path.endsWith('.canvas');
-    final name = file.path.split('/').last.replaceFirst(RegExp(r'\.(canvas|base)$'), '');
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(children: [
-            Icon(canvas ? Icons.dashboard_customize_outlined : Icons.table_chart_outlined, color: Accent.of(context)),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Text(name,
-                  maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w500)),
-            ),
-            Text(canvas ? 'Canvas' : 'Base', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-          ]),
         ),
       ),
     );

@@ -1,6 +1,4 @@
-/// Obsidian's note tools, as Docket's pages and sheets: the properties
-/// editor, file recovery, the tags view, and the slash commands of the
-/// editor.
+/// Obsidian's note tools, as Docket's pages and sheets: the properties editor and the tags view.
 library;
 
 import 'package:flutter/material.dart';
@@ -9,7 +7,6 @@ import '../../app/theme.dart';
 import '../../core/notes/moment.dart';
 import '../../core/notes/notebook.dart';
 import '../../core/notes/properties.dart';
-import '../../core/notes/recovery.dart';
 
 /// The note's properties, each with its kind's control: text, a list (comma separated here), a number, a
 /// checkbox, a date. Every change goes to [onChanged] at once, as in Obsidian: closing the sheet any way keeps it.
@@ -194,62 +191,6 @@ class _PropertiesSheetState extends State<_PropertiesSheet> {
   }
 }
 
-/// File recovery: the copies of a note kept as it changed; one to look at, and to bring back. Returns the text
-/// to restore, or null.
-class RecoveryScreen extends StatelessWidget {
-  const RecoveryScreen({super.key, required this.snapshots, required this.path, required this.title});
-
-  final Snapshots snapshots;
-  final String path;
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final copies = snapshots.of(path);
-    return Scaffold(
-      appBar: AppBar(title: const Text('File recovery')),
-      body: copies.isEmpty
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Text('No earlier versions of "$title" yet. A copy is kept as it changes, at most every five minutes.',
-                    textAlign: TextAlign.center, style: TextStyle(color: theme.colorScheme.outline)),
-              ),
-            )
-          : ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 24), children: [
-              for (final c in copies)
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.history_rounded),
-                    title: Text(formatMoment(c.at, 'ddd D MMM YYYY, HH:mm')),
-                    subtitle: Text(
-                      c.file.readAsStringSync().replaceAll(RegExp(r'\s+'), ' ').trim(),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    onTap: () async {
-                      final text = c.file.readAsStringSync();
-                      final restore = await showDialog<bool>(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: Text(formatMoment(c.at, 'ddd D MMM, HH:mm')),
-                          content: SingleChildScrollView(child: SelectableText(text)),
-                          actions: [
-                            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Close')),
-                            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Restore this')),
-                          ],
-                        ),
-                      );
-                      if (restore == true && context.mounted) Navigator.pop(context, text);
-                    },
-                  ),
-                ),
-            ]),
-    );
-  }
-}
-
 /// Obsidian's tags view: every tag with its count, nested tags (#work/q4) under their parent. Returns the tag
 /// picked, to show its notes.
 class TagsScreen extends StatelessWidget {
@@ -295,72 +236,3 @@ class TagsScreen extends StatelessWidget {
     );
   }
 }
-
-/// Obsidian's All properties view: every property the notes use, with how many use it and its kind. Tapping
-/// one gives back a search for the notes that have it ("[status]").
-class PropertiesScreen extends StatelessWidget {
-  const PropertiesScreen({super.key, required this.book});
-
-  final Notebook book;
-
-  static IconData iconOf(String kind) => switch (kind) {
-        'list' => Icons.format_list_bulleted_rounded,
-        'checkbox' => Icons.check_box_outlined,
-        'number' => Icons.numbers_rounded,
-        'date' => Icons.calendar_today_outlined,
-        'datetime' => Icons.schedule_rounded,
-        _ => Icons.short_text_rounded,
-      };
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final counts = <String, int>{};
-    final kinds = <String, String>{};
-    for (final n in book.notes) {
-      for (final k in propertyKeys(n.text)) {
-        counts[k] = (counts[k] ?? 0) + 1;
-        kinds.putIfAbsent(k, () => propertyKind(n.text, k));
-      }
-    }
-    final sorted = counts.keys.toList()..sort((a, b) => counts[b]!.compareTo(counts[a]!) != 0 ? counts[b]!.compareTo(counts[a]!) : a.compareTo(b));
-    return Scaffold(
-      appBar: AppBar(title: const Text('All properties')),
-      body: sorted.isEmpty
-          ? Center(child: Text('No note has properties yet.', style: TextStyle(color: theme.colorScheme.outline)))
-          : ListView(padding: const EdgeInsets.symmetric(vertical: 8), children: [
-              for (final k in sorted)
-                ListTile(
-                  leading: Icon(iconOf(kinds[k]!), color: Accent.of(context)),
-                  title: Text(k),
-                  trailing: Text('${counts[k]}', style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-                  onTap: () => Navigator.pop(context, '[$k]'),
-                ),
-            ]),
-    );
-  }
-}
-
-/// A slash command: what it is called, and the text it puts in place of "/command" ([cursor]: where the cursor
-/// goes within it, from its start; null: at its end).
-typedef SlashCommand = ({String name, IconData icon, String Function(DateTime now) text, int? cursor});
-
-final slashCommands = <SlashCommand>[
-  (name: 'Heading 1', icon: Icons.title_rounded, text: (_) => '# ', cursor: null),
-  (name: 'Heading 2', icon: Icons.title_rounded, text: (_) => '## ', cursor: null),
-  (name: 'Heading 3', icon: Icons.title_rounded, text: (_) => '### ', cursor: null),
-  (name: 'Task', icon: Icons.check_box_outlined, text: (_) => '- [ ] ', cursor: null),
-  (name: 'Bullet list', icon: Icons.format_list_bulleted_rounded, text: (_) => '- ', cursor: null),
-  (name: 'Numbered list', icon: Icons.format_list_numbered_rounded, text: (_) => '1. ', cursor: null),
-  (name: 'Quote', icon: Icons.format_quote_rounded, text: (_) => '> ', cursor: null),
-  (name: 'Callout', icon: Icons.info_outline_rounded, text: (_) => '> [!note] \n> ', cursor: 10),
-  (name: 'Code block', icon: Icons.code_rounded, text: (_) => '```\n\n```', cursor: 4),
-  (name: 'Table', icon: Icons.table_chart_outlined, text: (_) => '| Column | Column |\n| --- | --- |\n|  |  |', cursor: 2),
-  (name: 'Divider', icon: Icons.horizontal_rule_rounded, text: (_) => '---\n', cursor: null),
-  (name: 'Math block', icon: Icons.functions_rounded, text: (_) => r'$$' '\n\n' r'$$', cursor: 3),
-  (name: 'Footnote', icon: Icons.superscript_rounded, text: (_) => '^[]', cursor: 2),
-  (name: 'Highlight', icon: Icons.border_color_outlined, text: (_) => '====', cursor: 2),
-  (name: 'Comment', icon: Icons.visibility_off_outlined, text: (_) => '%%%%', cursor: 2),
-  (name: 'Today\'s date', icon: Icons.today_rounded, text: (now) => formatMoment(now, 'YYYY-MM-DD'), cursor: null),
-  (name: 'Time', icon: Icons.schedule_rounded, text: (now) => formatMoment(now, 'HH:mm'), cursor: null),
-];

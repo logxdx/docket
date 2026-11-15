@@ -3,7 +3,6 @@ package app.notesapp.notes_app
 import ai.desertant.clear.Clear
 import ai.desertant.clear.Options as ClearOptions
 import ai.desertant.ear.Ear
-import ai.desertant.emo.Emo
 import ai.desertant.gist.Gist
 import ai.desertant.voz.Voz
 import ai.desertant.who.Who
@@ -34,7 +33,7 @@ import java.util.concurrent.ConcurrentHashMap
  *    a step gives even when a later one fails: prepare (Clear cleans the audio, written as
  *    .m4a, and a 16 kHz copy is kept here), identify (Ear), transcribe with Voz or with the
  *    phone's own on-device recognizer, diarize (Who), refine word times (Align);
- *  - text: topics (Gist), emoji (Emo), a title (Title).
+ *  - text: topics (Gist), a title (Title).
  *
  * Every model is built from the folder [OfflineModels] filled from the APK, and only when that
  * folder is complete, so nothing is downloaded: the app works with no network at all.
@@ -71,7 +70,7 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
      * and the runtime keeps a packed copy of its weights). Only one is kept at a time: loading one
      * closes the others first, so a recording's steps never hold Clear, Ear and Voz together, which
      * on a 4-6 GB phone gets the app killed by Android's low-memory killer. The last one stays
-     * loaded, so using it again is quick. Gist and Emo are small and run on every save: they stay.
+     * loaded, so using it again is quick. Gist is small and runs on every save: it stays.
      */
     private val heavy = setOf("clear", "ear", "voz", "who", "phonon-en", "phonon-p25")
 
@@ -98,7 +97,6 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
     private fun voz() = model("voz") { Voz(context, it) }
     private fun who() = model("who") { Who(context, it) }
     private fun gist() = model("gist") { Gist(context, it) }
-    private fun emo() = model("emo") { Emo(context, it) }
 
     /** A Phonon-2.5 model kept like the SDK models (one heavy model at a time). */
     private class PhononHandle(val model: PhononAsr.Model) : AutoCloseable {
@@ -248,8 +246,6 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
         // Text
         "text.topics" -> gist()?.classify(call.argument<String>("text")!!, topK = call.argument<Int>("limit") ?: 3)
             ?.map { mapOf("slug" to it.slug, "name" to it.name, "score" to it.score) }
-        "text.emoji" -> emo()?.suggestions(call.argument<String>("text")!!, limit = call.argument<Int>("limit") ?: 3)
-            ?.map { mapOf("emoji" to it.emoji, "confidence" to it.confidence) }
         "text.title" -> work.withLock { extras.title(call.argument<String>("text")!!) }
 
         else -> throw IllegalArgumentException("no such call: ${call.method}")

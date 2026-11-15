@@ -360,15 +360,6 @@ class DesertAnt {
     ];
   }
 
-  /// Emo's emoji for [text], most likely first.
-  Future<List<({String emoji, double confidence})>> emoji(String text, {int limit = 1}) async {
-    final out = await _call<List>('text.emoji', {'text': text, 'limit': limit});
-    return [
-      for (final e in out ?? const [])
-        (emoji: (e as Map)['emoji'] as String, confidence: (e['confidence'] as num).toDouble()),
-    ];
-  }
-
   /// Title's title and description for [text], or null when Title is not on the phone.
   Future<({String title, String description})?> title(String text) async {
     final m = await _call<Map>('text.title', {'text': text});

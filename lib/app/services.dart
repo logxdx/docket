@@ -13,7 +13,6 @@ import 'package:saf_util/saf_util.dart';
 import '../core/ai/model.dart';
 import '../core/ai/prompts.dart';
 import '../core/notes/notebook.dart';
-import '../core/notes/recovery.dart';
 import '../core/notes/vault.dart';
 import '../core/voice/spoken.dart' show Engine;
 import '../core/voice/summaries.dart';
@@ -53,37 +52,26 @@ class Services {
 
   /// Notes: Notes/ in the app's folder, or a folder the user picked (an
   /// Obsidian vault).
-  late final notebook = Notebook(
-    _vault(),
-    cache: File('${support.path}/notes-index.json'),
-    snapshots: Snapshots(_snapshotsDir()),
-  )
-    ..templatesFolder = settings.get('notes.templates') ?? 'Templates'
+  late final notebook = Notebook(_vault(), cache: File('${support.path}/notes-index.json'))
     ..dailyFolder = settings.get('daily.folder') ?? 'Daily'
-    ..dailyFormat = settings.get('daily.format') ?? 'YYYY-MM-DD'
-    ..dailyTemplate = settings.get('daily.template') ?? '';
+    ..dailyFormat = settings.get('daily.format') ?? 'YYYY-MM-DD';
 
-  /// Settings › Notes: where daily notes go and how they are named, the template they start from, where
-  /// templates and attachments are.
+  /// Settings › Notes: where daily notes go and how they are named, where pictures go.
   void setNotesSetting(String key, String value) {
     settings.set(key, value.trim());
     switch (key) {
-      case 'notes.templates':
-        notebook.templatesFolder = value.trim().isEmpty ? 'Templates' : value.trim();
       case 'daily.folder':
         notebook.dailyFolder = value.trim();
       case 'daily.format':
         notebook.dailyFormat = value.trim().isEmpty ? 'YYYY-MM-DD' : value.trim();
-      case 'daily.template':
-        notebook.dailyTemplate = value.trim();
     }
   }
 
   /// Where images added to notes go ('' : next to the note).
   String get attachmentsFolder => settings.get('notes.attachments') ?? 'attachments';
 
-  /// A picked folder's own name for what the app keeps about it (file recovery, recent notes); '' for the app's
-  /// own notes, which keep the places they always had. FNV-1a of the folder's address: the same every run.
+  /// A picked folder's own name for what the app keeps about it (its recent notes); '' for the app's own notes,
+  /// which keep the place they always had. FNV-1a of the folder's address: the same every run.
   String get _vaultKey {
     final uri = settings.get('notes.vault') ?? '';
     if (uri.isEmpty) return '';
@@ -93,9 +81,6 @@ class Services {
     }
     return h.toUnsigned(64).toRadixString(16);
   }
-
-  Directory _snapshotsDir() =>
-      Directory(_vaultKey.isEmpty ? '${support.path}/snapshots' : '${support.path}/vault-snapshots/$_vaultKey');
 
   String get _recentKey => _vaultKey.isEmpty ? 'notes.recent' : 'notes.recent.$_vaultKey';
 
@@ -128,7 +113,6 @@ class Services {
     settings.set('notes.vault', uri ?? '');
     settings.set('notes.vaultName', name);
     settings.set('notes.readOnly', uri != null && readOnly ? 'on' : 'off');
-    notebook.snapshots?.dir = _snapshotsDir();
     await notebook.use(_vault());
   }
 
@@ -191,7 +175,7 @@ class Services {
   /// Emoji, tags and titles for typed notes as they are saved.
   late final enricher = Enricher(notebook: notebook, ant: ant, enabled: autoEnabled);
 
-  /// Settings › On-device AI: 'title', 'tags' or 'emoji', on unless turned off.
+  /// Settings › On-device AI: 'title' or 'tags', on unless turned off.
   bool autoEnabled(String feature) => settings.get('auto.$feature') != 'off';
 
   void setAutoEnabled(String feature, bool on) => settings.set('auto.$feature', on ? 'on' : 'off');

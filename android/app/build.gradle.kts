@@ -103,7 +103,6 @@ dependencies {
     implementation("ai.desertant:voz:$desertAnt")
     implementation("ai.desertant:who:$desertAnt")
     implementation("ai.desertant:gist:$desertAnt")
-    implementation("ai.desertant:emo:$desertAnt")
     // Align and Title for Android: built from Desert Ant's source and Docket's patches by
     // tool/build_desert_ant.sh (tool/ci.sh and tool/release.sh run it), not kept in git.
     implementation(fileTree("libs") { include("*.aar") })

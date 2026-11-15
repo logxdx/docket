@@ -17,7 +17,6 @@ import '../../core/ai/prompts.dart';
 import '../../core/ai/repair.dart';
 import '../../app/enricher.dart';
 import '../../app/recordings.dart';
-import '../../core/notes/enrich.dart';
 import '../../core/notes/format.dart';
 import '../../core/notes/journal.dart';
 import '../../core/notes/notebook.dart';
@@ -32,10 +31,8 @@ import 'markdown_view.dart';
 import 'navigation.dart';
 import 'note_tools.dart';
 import '../../core/notes/fuzzy.dart';
-import '../../core/notes/moment.dart';
-import '../../core/notes/obsidian.dart' show countWords, forReading, headingsOf;
+import '../../core/notes/obsidian.dart' show countWords, forReading;
 import 'notes_screen.dart' show pickFolder;
-import 'views_screens.dart' show SlidesScreen;
 import 'read_aloud_sheet.dart';
 import 'record_screen.dart';
 import 'spoken_view.dart';
@@ -69,21 +66,15 @@ class _NoteScreenState extends State<NoteScreen> {
   /// Note titles to offer while the cursor is inside an open [[.
   List<String> _suggest = const [];
 
-  /// Slash commands to offer after a "/" typed at a word's start.
-  List<SlashCommand> _slash = const [];
-
-  /// The text before the last change, to see a line just finished.
-  String _last = '';
-
-  /// Whether the note was changed on this page: then it is enriched (emoji,
-  /// tags, a title) when the editor or the page is left.
+  /// Whether the note was changed on this page: then it is enriched (tags, a
+  /// title) when the editor or the page is left.
   bool _edited = false;
 
   /// Each recording's playback, by audio name, shared by its player and its transcript.
   final _playbacks = <String, Playback>{};
 
-  /// The reading view's headings, by title and how many times that title came before: what the outline and
-  /// heading links scroll to.
+  /// The reading view's headings, by title and how many times that title came before: what heading links
+  /// ([[Note#Heading]]) scroll to.
   final _headingKeys = <String, GlobalKey>{};
 
   @override
@@ -116,102 +107,13 @@ class _NoteScreenState extends State<NoteScreen> {
     return _headingKeys.putIfAbsent('$title#$nth', GlobalKey.new);
   }
 
-  /// The outline: jump to a heading (in the editor, the cursor goes to it).
-  Future<void> _outline() async {
-    final body = withoutProperties(_text.text);
-    final headings = headingsOf(body);
-    final i = await showOutline(context, headings);
-    if (i == null || !mounted) return;
-    final h = headings[i];
-    if (_editing) {
-      final lines = body.split('\n');
-      final offset = _text.text.length - body.length + lines.take(h.line).fold<int>(0, (n, l) => n + l.length + 1);
-      _text.selection = TextSelection.collapsed(offset: offset + lines[h.line].length);
-      _focus.requestFocus();
-      return;
-    }
-    final nth = headings.take(i).where((x) => _norm(x.title) == _norm(h.title)).length;
-    _scrollToHeading(h.title, nth);
-  }
-
   final _focus = FocusNode();
-
-  /// Every action on this note, by name.
-  Future<void> _palette() async {
-    final services = ServicesScope.of(context);
-    final note = _book.byPath(_path);
-    final readOnly = _book.readOnly;
-    await showCommandPalette(context, [
-      Command('Open a note…', Icons.search_rounded, () async {
-        final picked = await showQuickSwitcher(context, book: _book, recent: services.recent);
-        if (picked != null && mounted) await _follow(picked.title);
-      }),
-      if (!readOnly) Command(_editing ? 'Reading view' : 'Edit', _editing ? Icons.visibility_outlined : Icons.edit_outlined, _toggleEditing),
-      Command('Outline', Icons.toc_rounded, _outline),
-      Command('Start presentation', Icons.slideshow_outlined, () => Navigator.push(context,
-          MaterialPageRoute<void>(builder: (_) => SlidesScreen(text: _text.text, title: note?.title ?? '', folder: note?.folder ?? '')))),
-      if (note != null && !readOnly)
-        Command(_book.isBookmarked(note) ? 'Remove bookmark' : 'Bookmark', Icons.bookmark_outline_rounded, _toggleBookmark),
-      if (!readOnly) ...[
-        Command('Edit properties', Icons.tune_rounded, _properties),
-        Command('Insert template', Icons.description_outlined, _insertTemplate),
-        Command('Insert today\'s date', Icons.today_rounded, () => _insert(formatMoment(DateTime.now(), 'YYYY-MM-DD'))),
-        Command('Insert time', Icons.schedule_rounded, () => _insert(formatMoment(DateTime.now(), 'HH:mm'))),
-        Command('Add a picture', Icons.image_outlined, _addImage),
-        Command('Extract selection to a new note', Icons.call_split_rounded, _extract),
-        Command('Merge into another note', Icons.call_merge_rounded, _mergeInto),
-        Command('File recovery', Icons.history_rounded, _recovery),
-      ],
-      if (note != null && (note.folder == _book.dailyFolder || note.folder.startsWith('${_book.dailyFolder}/'))) ...[
-        Command('Previous daily note', Icons.chevron_left_rounded, () => _adjacentDaily(-1)),
-        Command('Next daily note', Icons.chevron_right_rounded, () => _adjacentDaily(1)),
-      ],
-      Command('Word count', Icons.numbers_rounded, () {
-        final c = countWords(withoutProperties(_text.text));
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${c.words} words · ${c.characters} characters')));
-      }),
-      Command('Copy link to this note', Icons.link_rounded, () async {
-        await Clipboard.setData(ClipboardData(text: '[[${note?.title ?? ''}]]'));
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Link copied')));
-      }),
-      Command('Summarise', Icons.auto_awesome_outlined, () => _ai('summarise')),
-      if (!readOnly) ...[
-        Command('Tidy up', Icons.auto_fix_high_outlined, () => _ai('tidy')),
-        Command('Record into this note', Icons.mic_none_rounded, _record),
-        Command('Rename', Icons.drive_file_rename_outline_rounded, _rename),
-        Command('Move to folder', Icons.drive_file_move_outlined, _move),
-        Command('Move to trash', Icons.delete_outline_rounded, _delete),
-      ],
-      if (services.ant.status.value.speech)
-        Command('Read aloud', Icons.volume_up_outlined, () async {
-          await _flush();
-          if (mounted) await showReadAloud(context, _text.text);
-        }),
-      Command('Random note', Icons.casino_outlined, () async {
-        final n = _book.random();
-        if (n != null && mounted) await _follow(n.title);
-      }),
-    ]);
-    if (mounted) setState(() {});
-  }
 
   Future<void> _toggleEditing() async {
     await _flush();
     final leaving = _editing;
     setState(() => _editing = !_editing);
     if (leaving) await _enrich();
-  }
-
-  Future<void> _toggleBookmark() async {
-    await _flush();
-    final note = _book.byPath(_path);
-    if (note == null) return;
-    await _book.toggleBookmark(note);
-    if (mounted) {
-      setState(() {});
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(_book.isBookmarked(note) ? 'Bookmarked' : 'Bookmark removed')));
-    }
   }
 
   /// Add today's journaling [prompt] as a heading and write under it.
@@ -238,7 +140,7 @@ class _NoteScreenState extends State<NoteScreen> {
     _enricher = ServicesScope.of(context).enricher;
     if (_saved.isEmpty && _text.text.isEmpty) {
       final note = _book.byPath(_path);
-      _text.text = _saved = _last = note?.text ?? '';
+      _text.text = _saved = note?.text ?? '';
       _hadText = !Notebook.isBlank(_saved);
       _editing = !_book.readOnly && (widget.startEditing || _saved.trim().isEmpty);
     }
@@ -256,7 +158,7 @@ class _NoteScreenState extends State<NoteScreen> {
     if (moved != null) _path = moved;
     final file = _book.byPath(_path)?.text;
     if (_text.text == _saved) {
-      if (file != null && file != _saved) _text.text = _saved = _last = file;
+      if (file != null && file != _saved) _text.text = _saved = file;
     } else {
       var text = _text.text;
       for (final changes in recordings.edits.values) {
@@ -304,7 +206,7 @@ class _NoteScreenState extends State<NoteScreen> {
     final file = _book.byPath(after)?.text;
     setState(() {
       _path = after;
-      if (_text.text == _saved && file != null) _text.text = _saved = _last = file;
+      if (_text.text == _saved && file != null) _text.text = _saved = file;
     });
   }
 
@@ -375,11 +277,8 @@ class _NoteScreenState extends State<NoteScreen> {
     _save?.cancel();
     _save = Timer(const Duration(milliseconds: 700), _flush);
     _edited = true;
-    _emojiOnNewline(_last, text);
-    _last = text;
     final before = text.substring(0, _text.selection.baseOffset.clamp(0, text.length));
     final open = RegExp(r'\[\[([^\[\]\n|#]*)$').firstMatch(before);
-    final slash = open == null ? RegExp(r'(?:^|\s)/([\p{L}\p{N} ]{0,24})$', unicode: true).firstMatch(before) : null;
     setState(() {
       _suggest = open == null
           ? const []
@@ -387,42 +286,7 @@ class _NoteScreenState extends State<NoteScreen> {
               for (final n in fuzzyRank(open[1]!, _book.notes, noteNames))
                 if (n.path != _path) n.title,
             ].take(8).toList();
-      _slash = slash == null
-          ? const []
-          : slash[1]!.isEmpty
-              ? slashCommands
-              : fuzzyRank(slash[1]!, slashCommands, (c) => [c.name]).take(8).toList();
     });
-  }
-
-  /// A task (or a daily note's timed entry) just finished with Enter: its
-  /// emoji goes in front, if the line is still the same when Emo answers.
-  void _emojiOnNewline(String before, String after) {
-    final at = _text.selection.baseOffset;
-    if (after.length != before.length + 1 || at <= 0 || at > after.length || after[at - 1] != '\n') return;
-    final lineStart = after.lastIndexOf('\n', at - 2) + 1;
-    final line = after.substring(lineStart, at - 1);
-    final spot = emojiSpots(line, daily: _path.startsWith('${_book.dailyFolder}/')).firstOrNull;
-    if (spot == null) return;
-    final enricher = _enricher;
-    unawaited(() async {
-      final emoji = await enricher.emojiFor(spot.phrase);
-      if (emoji == null || !mounted) return;
-      final now = _text.value;
-      // The same line, still where it was?
-      if (lineStart + line.length > now.text.length || now.text.substring(lineStart, lineStart + line.length) != line) return;
-      if (lineStart > 0 && now.text[lineStart - 1] != '\n') return;
-      final insert = lineStart + spot.at;
-      final added = '$emoji ';
-      final text = now.text.replaceRange(insert, insert, added);
-      int shift(int o) => o >= insert ? o + added.length : o;
-      _text.value = TextEditingValue(
-        text: text,
-        selection: TextSelection(baseOffset: shift(now.selection.baseOffset), extentOffset: shift(now.selection.extentOffset)),
-      );
-      _last = text;
-      _changed(text);
-    }());
   }
 
   Future<void> _flush() async {
@@ -445,19 +309,6 @@ class _NoteScreenState extends State<NoteScreen> {
     _changed(_text.text);
   }
 
-  /// A slash command picked: its text in place of "/what was typed".
-  void _runSlash(SlashCommand c) {
-    final at = _text.selection.isValid ? _text.selection.baseOffset : _text.text.length;
-    final start = _text.text.substring(0, at).lastIndexOf('/');
-    if (start < 0) return;
-    final insert = c.text(DateTime.now());
-    _text.value = TextEditingValue(
-      text: _text.text.replaceRange(start, at, insert),
-      selection: TextSelection.collapsed(offset: start + (c.cursor ?? insert.length)),
-    );
-    _changed(_text.text);
-  }
-
   /// The editor open and focused, so a change made from a menu can be undone (Flutter's undo history only
   /// follows a focused field).
   Future<void> _focusEditor() async {
@@ -471,15 +322,14 @@ class _NoteScreenState extends State<NoteScreen> {
     if (opened) await Future<void>.delayed(const Duration(milliseconds: 600));
   }
 
-  /// [snippet] where the cursor is (at the end when the editor has none), the editor opened; a [block] (a
-  /// template) starts on a line of its own.
-  Future<void> _insert(String snippet, {bool block = false}) async {
+  /// [snippet] where the cursor is (at the end when the editor has none), on a line of its own, the editor opened.
+  Future<void> _insert(String snippet) async {
     await _focusEditor();
     if (!mounted) return;
     final value = _text.value;
     final at = value.selection.isValid ? value.selection.start : value.text.length;
     final end = value.selection.isValid ? value.selection.end : at;
-    final text = block && at > 0 && value.text[at - 1] != '\n' ? '\n$snippet' : snippet;
+    final text = at > 0 && value.text[at - 1] != '\n' ? '\n$snippet' : snippet;
     _text.value = TextEditingValue(
       text: value.text.replaceRange(at, end, text),
       selection: TextSelection.collapsed(offset: at + text.length),
@@ -498,46 +348,6 @@ class _NoteScreenState extends State<NoteScreen> {
     await _flush();
   }
 
-  /// Obsidian's Templates: a template's properties added to the note's, its text at the cursor, {{date}} and
-  /// the rest filled in.
-  Future<void> _insertTemplate() async {
-    final templates = _book.templates;
-    if (templates.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('No templates yet: notes in the "${_book.templatesFolder}" folder are templates.')));
-      return;
-    }
-    final picked = await showModalBottomSheet<Note>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: ListView(shrinkWrap: true, children: [
-          for (final t in templates)
-            ListTile(leading: const Icon(Icons.description_outlined), title: Text(t.title), onTap: () => Navigator.pop(context, t)),
-        ]),
-      ),
-    );
-    if (picked == null || !mounted) return;
-    await _focusEditor();
-    if (!mounted) return;
-    final title = _book.byPath(_path)?.title ?? '';
-    final filled = applyTemplate(picked.text, title: title, now: DateTime.now());
-    var text = _text.text;
-    for (final key in propertyKeys(filled)) {
-      if (propertyKeys(text).contains(key)) continue;
-      text = withPropertyValue(text, key,
-          propertyKind(filled, key) == 'list' ? propertyList(filled, key) : (propertyText(filled, key) ?? ''));
-    }
-    if (text != _text.text) {
-      final shift = text.length - _text.text.length;
-      final sel = _text.selection;
-      _text.value = TextEditingValue(
-        text: text,
-        selection: sel.isValid ? TextSelection.collapsed(offset: sel.start + shift) : TextSelection.collapsed(offset: text.length),
-      );
-    }
-    await _insert(withoutProperties(filled), block: true);
-  }
 
   /// A picture from the phone, copied into the vault's attachments folder and embedded at the cursor.
   Future<void> _addImage() async {
@@ -568,92 +378,9 @@ class _NoteScreenState extends State<NoteScreen> {
     await _insert('![[$name]]\n');
   }
 
-  /// Note composer: this note's text added to another, and this one put in the trash.
-  Future<void> _mergeInto() async {
-    await _flush();
-    if (!mounted) return;
-    final source = _book.byPath(_path);
-    if (source == null) return;
-    final target = await showQuickSwitcher(context,
-        book: _book, recent: ServicesScope.of(context).recent, exclude: source.path, canCreate: false, hint: 'Merge into…');
-    if (target == null || target.path == source.path || !mounted) return;
-    final sure = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Merge into "${target.title}"?'),
-        content: Text('"${source.title}" is added to the end of "${target.title}", links to it are changed to '
-            '"${target.title}", and it goes to the trash.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Merge')),
-        ],
-      ),
-    );
-    if (sure != true || !mounted) return;
-    _saved = _text.text;
-    final merged = await _book.merge(source, target);
-    if (mounted) {
-      await Navigator.pushReplacement(context, MaterialPageRoute<void>(builder: (_) => NoteScreen(path: merged.path)));
-    }
-  }
 
-  /// Note composer: the selected text made a note of its own, a link to it left in its place.
-  Future<void> _extract() async {
-    final sel = _text.selection;
-    if (!_editing || !sel.isValid || sel.isCollapsed) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select some text in the editor first.')));
-      return;
-    }
-    final part = _text.text.substring(sel.start, sel.end).trim();
-    final guess = part.split('\n').first.replaceAll(RegExp(r'^#+\s*|[*_`]'), '').trim();
-    final name = TextEditingController(text: guess.length > 60 ? guess.substring(0, 60) : guess);
-    final title = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Extract to a new note'),
-        content: TextField(controller: name, autofocus: true, decoration: const InputDecoration(hintText: 'Title')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, name.text), child: const Text('Extract')),
-        ],
-      ),
-    );
-    name.dispose();
-    if (title == null || title.trim().isEmpty || !mounted) return;
-    await _flush();
-    final note = _book.byPath(_path);
-    if (note == null) return;
-    final made = await _book.extract(note, sel.start, sel.end, title.trim());
-    final now = _book.byPath(_path)?.text ?? _text.text;
-    setState(() => _text.text = _saved = _last = now);
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Made "${made.title}"')));
-  }
 
-  Future<void> _recovery() async {
-    await _flush();
-    final snapshots = _book.snapshots;
-    final note = _book.byPath(_path);
-    if (snapshots == null || note == null || !mounted) return;
-    final text = await Navigator.push<String>(
-        context, MaterialPageRoute(builder: (_) => RecoveryScreen(snapshots: snapshots, path: note.path, title: note.title)));
-    if (text == null || !mounted) return;
-    setState(() => _text.text = text);
-    _changed(text);
-    await _flush();
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Restored')));
-  }
 
-  Future<void> _adjacentDaily(int step) async {
-    await _flush();
-    final note = _book.byPath(_path);
-    final other = note == null ? null : _book.adjacentDaily(note, step);
-    if (!mounted) return;
-    if (other == null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No daily note ${step < 0 ? 'before' : 'after'} this one')));
-      return;
-    }
-    await Navigator.pushReplacement(context, MaterialPageRoute<void>(builder: (_) => NoteScreen(path: other.path)));
-  }
 
   /// A toolbar edit on the text and its selection.
   void _format(Edit Function(Edit) change) {
@@ -713,6 +440,29 @@ class _NoteScreenState extends State<NoteScreen> {
     } on StateError catch (error) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.message)));
     }
+  }
+
+  /// Into the archive: out of the lists and search, kept, and back from the archive (or Undo). An archived note
+  /// goes back where it was.
+  Future<void> _archive() async {
+    await _flush();
+    final note = _book.byPath(_path);
+    if (note == null || !mounted) return;
+    final book = _book;
+    final messenger = ScaffoldMessenger.of(context);
+    if (Notebook.isArchived(note.path)) {
+      final back = await book.unarchive(note);
+      setState(() => _path = back.path);
+      messenger.showSnackBar(SnackBar(content: Text('"${back.title}" is back in ${back.folder.isEmpty ? 'the top folder' : back.folder}')));
+      return;
+    }
+    final archived = await book.archive(note);
+    _path = archived.path;
+    messenger.showSnackBar(SnackBar(
+      content: Text('"${note.title}" archived'),
+      action: SnackBarAction(label: 'Undo', onPressed: () => book.unarchive(book.byPath(archived.path) ?? archived)),
+    ));
+    if (mounted) Navigator.pop(context);
   }
 
   Future<void> _delete() async {
@@ -934,29 +684,25 @@ class _NoteScreenState extends State<NoteScreen> {
               icon: const Icon(Icons.mic_none_rounded),
               onPressed: _record,
             ),
-          PopupMenuButton<String>(
-            onSelected: (choice) => switch (choice) {
-              'delete' => _delete(),
-              'move' => _move(),
-              'outline' => _outline(),
-              'bookmark' => _toggleBookmark(),
-              'commands' => _palette(),
-              'properties' => _properties(),
-              _ => _rename(),
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(value: 'commands', child: Text('Command palette')),
-              const PopupMenuItem(value: 'outline', child: Text('Outline')),
-              if (!readOnly) const PopupMenuItem(value: 'properties', child: Text('Properties')),
-              if (!readOnly && note != null)
-                PopupMenuItem(value: 'bookmark', child: Text(book.isBookmarked(note) ? 'Remove bookmark' : 'Bookmark')),
-              if (!readOnly) ...const [
-                PopupMenuItem(value: 'rename', child: Text('Rename')),
-                PopupMenuItem(value: 'move', child: Text('Move to folder')),
-                PopupMenuItem(value: 'delete', child: Text('Move to trash')),
+          if (!readOnly)
+            PopupMenuButton<String>(
+              onSelected: (choice) => switch (choice) {
+                'delete' => _delete(),
+                'move' => _move(),
+                'archive' => _archive(),
+                'picture' => _addImage(),
+                'properties' => _properties(),
+                _ => _rename(),
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(value: 'properties', child: Text('Properties')),
+                const PopupMenuItem(value: 'picture', child: Text('Add a picture')),
+                const PopupMenuItem(value: 'rename', child: Text('Rename')),
+                const PopupMenuItem(value: 'move', child: Text('Move to folder')),
+                PopupMenuItem(value: 'archive', child: Text(Notebook.isArchived(_path) ? 'Restore from archive' : 'Archive')),
+                const PopupMenuItem(value: 'delete', child: Text('Move to trash')),
               ],
-            ],
-          ),
+            ),
         ],
       ),
       body: _editing
@@ -990,17 +736,7 @@ class _NoteScreenState extends State<NoteScreen> {
                   ),
                 ),
               ),
-              if (_suggest.isEmpty && _slash.isEmpty && journal != null) journal,
-              if (_slash.isNotEmpty)
-                SizedBox(
-                  height: 48,
-                  child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12), children: [
-                    for (final c in _slash) ...[
-                      _PillChip(icon: c.icon, label: c.name, onPressed: () => _runSlash(c)),
-                      const SizedBox(width: 8),
-                    ],
-                  ]),
-                ),
+              if (_suggest.isEmpty && journal != null) journal,
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 2),
                 child: Align(

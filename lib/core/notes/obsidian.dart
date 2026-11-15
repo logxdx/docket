@@ -162,19 +162,6 @@ String? blockOf(String text, String id) {
   return null;
 }
 
-/// The headings of [text], for the outline: level and title, outside code.
-List<({int level, String title, int line})> headingsOf(String text) {
-  final out = <({int level, String title, int line})>[];
-  var inCode = false;
-  for (final (i, line) in text.split('\n').indexed) {
-    if (line.trimLeft().startsWith('```')) inCode = !inCode;
-    if (inCode) continue;
-    final h = RegExp(r'^(#{1,6})\s+(.*?)\s*#*\s*$').firstMatch(line);
-    if (h != null && h[2]!.isNotEmpty) out.add((level: h[1]!.length, title: h[2]!, line: i));
-  }
-  return out;
-}
-
 /// Words and characters in a note's text, as Obsidian's word count shows them: its body, without properties or
 /// comments; each CJK character a word of its own.
 ({int words, int characters}) countWords(String body) {
@@ -186,21 +173,3 @@ List<({int level, String title, int line})> headingsOf(String text) {
   return (words: words + cjk.allMatches(text).length, characters: text.trim().length);
 }
 
-/// A note as slides, as Obsidian's Slides plugin shows it: its body cut at each line that is only "---" (outside
-/// code), empty slides left out.
-List<String> slidesOf(String body) {
-  final slides = <String>[];
-  final buf = <String>[];
-  var inCode = false;
-  for (final line in body.split('\n')) {
-    if (line.trimLeft().startsWith('```')) inCode = !inCode;
-    if (!inCode && line.trim() == '---') {
-      if (buf.join('\n').trim().isNotEmpty) slides.add(buf.join('\n').trim());
-      buf.clear();
-      continue;
-    }
-    buf.add(line);
-  }
-  if (buf.join('\n').trim().isNotEmpty) slides.add(buf.join('\n').trim());
-  return slides;
-}

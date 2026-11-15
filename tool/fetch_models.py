@@ -48,8 +48,6 @@ MODELS = {
     "gist": ("desert-ant-labs/gist", "v2.2.0",
              ["gist.tflite", "gist_tokenizer.bin", "gist_embedding.i8", "gist_embedding.json", "gist_config.json",
               "taxonomy.json"]),
-    # Emoji suggestions.
-    "emo": ("desert-ant-labs/emo", "v0.7.0", ["emo.tflite", "emo_meta.json", "emo_tokenizer.bin"]),
     # Word-timestamp refinement: LiteRT graphs (Android port in third_party/desert-ant-core, branch android-align).
     "align": ("desert-ant-labs/align", "v1.1.0",
               ["align-coarse.tflite", "align-fine.tflite", "mel_filters.bin", "calibrator.bin", "refiner_config.json"]),

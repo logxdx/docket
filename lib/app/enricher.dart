@@ -1,6 +1,5 @@
 /// What the on-device models add to a typed note when it is saved (leaving
-/// the editor or the page): an emoji on each new task and calendar entry
-/// (Emo); topic tags (Gist) and a description (Title) in the note's front
+/// the editor or the page): topic tags (Gist) and a description (Title) in the note's front
 /// matter, as Obsidian keeps properties; and, for a note still called
 /// "Untitled", a title (Title, else the note's own first words). The rules are
 /// in lib/core/notes/enrich.dart and properties.dart; this runs them. All on
@@ -18,33 +17,11 @@ class Enricher {
   final Notebook notebook;
   final DesertAnt ant;
 
-  /// Settings › On-device AI: 'title', 'tags', 'emoji' each on or off.
+  /// Settings › On-device AI: 'title' and 'tags' each on or off.
   final bool Function(String feature) enabled;
-
-  /// How sure Emo must be before an emoji goes in unasked.
-  static const emojiConfidence = 0.2;
 
   /// Words a note needs before it is tagged or described: a line or two says too little.
   static const tagWords = 12;
-
-  /// The emoji for one task or calendar entry, or null.
-  Future<String?> emojiFor(String phrase) async {
-    if (!enabled('emoji')) return null;
-    final best = (await ant.emoji(phrase)).firstOrNull;
-    return best != null && best.confidence >= emojiConfidence ? best.emoji : null;
-  }
-
-  /// [text] with an emoji on each task (and daily-note entry) still without one.
-  Future<String> withEmojis(String text, {required bool daily}) async {
-    if (!enabled('emoji')) return text;
-    var out = text;
-    // The spots are found once: each insertion changes only its own line.
-    for (final spot in emojiSpots(text, daily: daily).take(30)) {
-      final e = await emojiFor(spot.phrase);
-      if (e != null) out = withEmoji(out, spot, e);
-    }
-    return out;
-  }
 
   /// Enrich the note at [path] as saved; returns its path afterwards (a new
   /// one when it was titled).
@@ -53,12 +30,10 @@ class Enricher {
     if (note == null || notebook.readOnly) return path;
     // A recording still being processed is named when it is done.
     if (note.text.contains('<!-- notes:transcribing ')) return path;
-    // A template is copied into new notes: its front matter is the user's to write.
-    final templates = notebook.templatesFolder, days = notebook.dailyFolder;
-    if (note.folder == templates || note.folder.startsWith('$templates/')) return path;
+    final days = notebook.dailyFolder;
     final daily = note.folder == days || note.folder.startsWith('$days/');
     try {
-      var text = await withEmojis(note.text, daily: daily);
+      var text = note.text;
       final prose = proseOf(text);
       final words = prose.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
       // Topics only for a note with no tags yet (inline or in its properties): a user's own tagging is not

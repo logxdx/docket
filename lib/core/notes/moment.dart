@@ -1,6 +1,6 @@
-/// Dates in the Moment.js formats Obsidian's templates and daily notes use
-/// ({{date:YYYY-MM-DD}}, "dddd, MMMM Do"): the common tokens, [literal text]
-/// in brackets kept as it is.
+/// Dates in the Moment.js formats Obsidian's daily notes use (YYYY-MM-DD,
+/// "dddd, MMMM Do"): the common tokens, [literal text] in brackets kept as it
+/// is.
 library;
 
 const _months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -62,15 +62,3 @@ String formatMoment(DateTime d, String format) {
     };
   });
 }
-
-/// A template filled in as Obsidian's Templates plugin does: {{title}}, {{date}}, {{time}}, and
-/// {{date:FORMAT}} / {{time:FORMAT}} with a Moment format.
-String fillTemplate(String template, {required String title, required DateTime now}) =>
-    template.replaceAllMapped(RegExp(r'\{\{\s*(title|date|time)(?:\s*:\s*([^}]*?))?\s*\}\}'), (m) {
-      final format = m[2];
-      return switch (m[1]) {
-        'title' => title,
-        'date' => formatMoment(now, format ?? 'YYYY-MM-DD'),
-        _ => formatMoment(now, format ?? 'HH:mm'),
-      };
-    });

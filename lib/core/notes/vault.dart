@@ -66,14 +66,8 @@ abstract class Vault {
   /// The notes in [folder] (a dot-folder such as .trash, which [list] skips), recursively.
   Future<List<VaultFile>> listIn(String folder);
 
-  /// Whether [listIn] lists a file: a note, a canvas or a base.
-  static bool kept(String name) => name.endsWith('.md') || name.endsWith('.canvas') || name.endsWith('.base');
-
   /// The bytes of the file at [path] (an image), or null when it is not there.
   Future<Uint8List?> readBytes(String path);
-
-  /// Every file whose name ends with [suffix] (".canvas", ".base"), as [list] finds notes.
-  Future<List<VaultFile>> listFiles(String suffix);
 }
 
 class LocalVault implements Vault {
@@ -211,11 +205,6 @@ class LocalVault implements Vault {
     return file.existsSync() ? file.readAsBytes() : null;
   }
 
-  @override
-  Future<List<VaultFile>> listFiles(String suffix) async => [
-        await for (final (f, stat) in _walk(suffix))
-          VaultFile(path: f.path.substring(root.path.length + 1), uri: f.path, mtime: stat.modified.millisecondsSinceEpoch, size: stat.size),
-      ];
 
   @override
   Future<List<VaultFile>> listIn(String folder) async {
@@ -223,7 +212,7 @@ class LocalVault implements Vault {
     if (!dir.existsSync()) return [];
     return [
       await for (final e in dir.list(recursive: true, followLinks: false))
-        if (e is File && Vault.kept(e.path)) _entry(e),
+        if (e is File && e.path.endsWith('.md')) _entry(e),
     ];
   }
 }
@@ -286,8 +275,6 @@ class ReadOnlyVault implements Vault {
   @override
   Future<Uint8List?> readBytes(String path) => inner.readBytes(path);
 
-  @override
-  Future<List<VaultFile>> listFiles(String suffix) => inner.listFiles(suffix);
 }
 
 class ReadOnlyNotes implements Exception {

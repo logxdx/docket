@@ -10,10 +10,8 @@ import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 
-import 'bookmarks.dart';
 import 'moment.dart';
 import 'properties.dart';
-import 'recovery.dart';
 import 'search.dart';
 import 'vault.dart';
 
@@ -87,10 +85,6 @@ Set<String> parseTags(String text) => {
 /// [text] without YAML front matter.
 String _body(String text) => withoutProperties(text);
 
-/// [template] for a new note: {{title}}, {{date}}, {{time}} and {{date:FORMAT}} filled in, as Obsidian does.
-String applyTemplate(String template, {required String title, required DateTime now}) =>
-    fillTemplate(template, title: title, now: now);
-
 /// A file name from a title: what a file system will not take, removed.
 String fileName(String title) {
   final clean = title.replaceAll(RegExp(r'[\\/:*?"<>|#^\[\]]'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
@@ -98,10 +92,7 @@ String fileName(String title) {
 }
 
 class Notebook extends ChangeNotifier {
-  Notebook(this.vault, {this.cache, this.snapshots});
-
-  /// File recovery: copies of notes as they change (null: none kept).
-  final Snapshots? snapshots;
+  Notebook(this.vault, {this.cache});
 
   Vault vault;
 
@@ -114,14 +105,18 @@ class Notebook extends ChangeNotifier {
   /// The vault's folders, empty ones too (refreshed with the notes).
   final _folders = <String>{};
 
-  /// The vault's canvases (.canvas) and bases (.base), refreshed with the notes.
-  List<VaultFile> others = const [];
-
-  /// Bookmarked notes, shared with Obsidian (.obsidian/bookmarks.json).
-  Bookmarks bookmarks = Bookmarks.parse(null);
   bool loading = false;
 
-  List<Note> get notes => _notes.values.toList()..sort((a, b) => b.file.mtime.compareTo(a.file.mtime));
+  /// The notes, newest first; archived ones left out (see [archived]).
+  List<Note> get notes =>
+      [for (final n in _notes.values) if (!isArchived(n.path)) n]..sort((a, b) => b.file.mtime.compareTo(a.file.mtime));
+
+  /// Where archived notes and folders go: a folder in the vault, as Obsidian users keep one. Inside it they keep
+  /// their place ("Archive/Work/Plan.md"), so they can go back; out of the lists, search, tags and the graph, their
+  /// [[links]] still lead to them.
+  static const archiveDir = 'Archive';
+
+  static bool isArchived(String path) => path == archiveDir || path.startsWith('$archiveDir/');
 
   /// The user's own notes, only read: no editing, new notes or saving.
   bool get readOnly => vault is ReadOnlyVault;
@@ -167,16 +162,6 @@ class Notebook extends ChangeNotifier {
       } on Object {
         // Folders unreadable: those the notes are in still show.
       }
-      try {
-        others = [...await vault.listFiles('.canvas'), ...await vault.listFiles('.base')];
-      } on Object {
-        // Unreadable: none shown.
-      }
-      try {
-        bookmarks = Bookmarks.parse(await vault.readAttachment(Bookmarks.path));
-      } on Object {
-        // None, or unreadable: none.
-      }
       _saveCache();
     } finally {
       loading = false;
@@ -208,7 +193,7 @@ class Notebook extends ChangeNotifier {
   /// Every tag and how many notes carry it, most used first.
   List<(String, int)> tags() {
     final counts = <String, int>{};
-    for (final n in _notes.values) {
+    for (final n in notes) {
       for (final t in n.tags) {
         counts[t] = (counts[t] ?? 0) + 1;
       }
@@ -219,8 +204,11 @@ class Notebook extends ChangeNotifier {
   /// Notes matching [query] in Obsidian's search syntax (lib/core/notes/search.dart); title matches first.
   List<Note> search(String query) => SearchQuery.parse(query).run(notes);
 
-  /// Every folder: the vault's own (empty ones too), those notes are in and their parents, by name.
-  List<String> get folders {
+  /// Every folder: the vault's own (empty ones too), those notes are in and their parents, by name; the archive
+  /// left out.
+  List<String> get folders => [for (final f in _allFolders) if (!isArchived(f)) f];
+
+  List<String> get _allFolders {
     final all = <String>{..._folders};
     for (final n in _notes.values) {
       for (var f = n.folder; f.isNotEmpty; f = parentOf(f)) {
@@ -228,6 +216,47 @@ class Notebook extends ChangeNotifier {
       }
     }
     return all.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  }
+
+  /// What is directly in [folder] of the archive ("Archive", "Archive/Work"): its folders, then its notes.
+  List<String> archivedFoldersIn(String folder) => [for (final f in _allFolders) if (parentOf(f) == folder) f];
+  List<Note> archivedNotesIn(String folder) =>
+      [for (final n in _notes.values) if (n.folder == folder) n]..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+
+  /// Whether anything is archived.
+  bool get hasArchive => _allFolders.contains(archiveDir) || _notes.keys.any(isArchived);
+
+  /// [note] into the archive, under its folder there.
+  Future<Note> archive(Note note) => _moveFree(note, _join(archiveDir, note.folder));
+
+  /// An archived note back where it was.
+  Future<Note> unarchive(Note note) =>
+      _moveFree(note, note.folder == archiveDir ? '' : note.folder.substring(archiveDir.length + 1));
+
+  /// The folder [path] into the archive, with everything in it. Where it went.
+  Future<String> archiveFolder(String path) => _moveFolderFree(path, _join(archiveDir, path));
+
+  /// An archived folder back where it was. Where it went.
+  Future<String> unarchiveFolder(String path) => _moveFolderFree(path, path.substring(archiveDir.length + 1));
+
+  /// [note] into [folder], as "Plan 2" when a "Plan" is there already.
+  Future<Note> _moveFree(Note note, String folder) async {
+    var name = note.title;
+    for (var n = 2; _notes.containsKey(_join(folder, '$name.md')); n++) {
+      name = '${note.title} $n';
+    }
+    if (name != note.title) note = await rename(note, name);
+    return moveNote(note, folder);
+  }
+
+  /// The folder [from] to [to], as "to 2" when that is taken.
+  Future<String> _moveFolderFree(String from, String to) async {
+    var free = to;
+    for (var n = 2; _allFolders.contains(free); n++) {
+      free = '$to $n';
+    }
+    await moveFolder(from, free);
+    return free;
   }
 
   /// The folders directly in [parent] ('' for the top).
@@ -260,9 +289,7 @@ class Notebook extends ChangeNotifier {
     _notes.remove(note.path);
     final moved = Note(file: file, text: note.text);
     _notes[path] = moved;
-    snapshots?.moved(note.path, path);
     await _relinkPaths({_noExt(note.path): _noExt(path)});
-    await _bookmarksMoved({note.path: path});
     _saveCache();
     notifyListeners();
     return _notes[path] ?? moved;
@@ -273,7 +300,7 @@ class Notebook extends ChangeNotifier {
   Future<void> moveFolder(String from, String to) async {
     if (from == to) return;
     if (to == from || to.startsWith('$from/')) throw StateError('A folder cannot go into itself');
-    if (folders.contains(to)) throw StateError('"$to" already exists');
+    if (_allFolders.contains(to)) throw StateError('"$to" already exists');
     final inside = [for (final n in _notes.values) if (n.folder == from || n.folder.startsWith('$from/')) n];
     await vault.moveFolder(from, to);
     for (final n in inside) {
@@ -285,7 +312,6 @@ class Notebook extends ChangeNotifier {
       ..addAll(renamed.values);
     await refresh();
     await _relinkPaths({for (final n in inside) _noExt(n.path): _noExt('$to${n.path.substring(from.length)}')});
-    await _bookmarksMoved({for (final n in inside) n.path: to.startsWith('$trashDir/') ? null : '$to${n.path.substring(from.length)}'});
   }
 
   /// Rename the folder [path] to [name] where it is.
@@ -315,14 +341,13 @@ class Notebook extends ChangeNotifier {
   static const trashDir = '.trash';
 
   /// Whether [text] holds nothing: blank, or an empty properties block. A note with properties alone (a record
-  /// a base lists) is not empty.
+  /// Obsidian's Bases list) is not empty.
   static bool isBlank(String text) => withoutProperties(text).trim().isEmpty && propertyKeys(text).isEmpty;
 
   /// Delete [note] for good, not to the trash: for an empty note left behind.
   Future<void> deleteNote(Note note) async {
     await vault.delete(note.file);
     _notes.remove(note.path);
-    await _bookmarksMoved({note.path: null});
     _saveCache();
     notifyListeners();
   }
@@ -332,7 +357,6 @@ class Notebook extends ChangeNotifier {
     // Under its own path, so it can go back where it was.
     await vault.move(note.file, await _freeInTrash(note.path));
     _notes.remove(note.path);
-    await _bookmarksMoved({note.path: null});
     _saveCache();
     notifyListeners();
   }
@@ -347,53 +371,22 @@ class Notebook extends ChangeNotifier {
   Future<List<VaultFile>> trashed() async =>
       (await vault.listIn(trashDir))..sort((a, b) => b.mtime.compareTo(a.mtime));
 
-  /// Put a note, canvas or base from the trash back in the folder it was in (renamed when the name is taken
-  /// there). Where it went.
-  Future<VaultFile> restore(VaultFile file) async {
+  /// Put a note from the trash back in the folder it was in (renamed when the name is taken there).
+  Future<Note> restore(VaultFile file) async {
+    final text = await vault.read(file);
     final was = file.path.substring(trashDir.length + 1);
-    final ext = extOf(was);
     final folder = parentOf(was);
-    final base = was.split('/').last;
-    final stem = base.substring(0, base.length - ext.length);
-    bool taken(String p) => _notes.containsKey(p) || others.any((f) => f.path == p);
-    var name = stem;
-    for (var n = 2; taken(_join(folder, '$name$ext')); n++) {
-      name = '$stem $n';
+    final base = _noExt(was.split('/').last);
+    var name = base;
+    for (var n = 2; _notes.containsKey(_join(folder, '$name.md')); n++) {
+      name = '$base $n';
     }
-    final text = ext == '.md' ? await vault.read(file) : null;
-    final moved = await vault.move(file, _join(folder, '$name$ext'));
-    if (text != null) {
-      _notes[moved.path] = Note(file: moved, text: text);
-      _saveCache();
-    } else {
-      others = [...others, moved];
-    }
+    final moved = await vault.move(file, _join(folder, '$name.md'));
+    final note = Note(file: moved, text: text);
+    _notes[moved.path] = note;
+    _saveCache();
     notifyListeners();
-    return moved;
-  }
-
-  /// A file's kind by its name: ".md", ".canvas" or ".base" ('' for anything else).
-  static String extOf(String path) => RegExp(r'\.(md|canvas|base)$').firstMatch(path)?.group(0) ?? '';
-
-  /// Move a canvas or base to the trash.
-  Future<void> trashFile(VaultFile file) async {
-    await vault.move(file, await _freeInTrash(file.path));
-    others = [for (final f in others) if (f.path != file.path) f];
-    notifyListeners();
-  }
-
-  /// Rename a canvas or base where it is ([name]), or move it into [folder].
-  Future<VaultFile> moveFile(VaultFile file, {String? name, String? folder}) async {
-    final ext = extOf(file.path);
-    final last = file.path.split('/').last;
-    final stem = name == null ? last.substring(0, last.length - ext.length) : fileName(name);
-    final path = _join(folder ?? parentOf(file.path), '$stem$ext');
-    if (path == file.path) return file;
-    if (others.any((f) => f.path == path)) throw StateError('"$stem$ext" already exists there');
-    final moved = await vault.move(file, path);
-    others = [for (final f in others) if (f.path != file.path) f, moved];
-    notifyListeners();
-    return moved;
+    return note;
   }
 
   /// Delete a note in the trash for good.
@@ -405,36 +398,13 @@ class Notebook extends ChangeNotifier {
   /// [path] in the trash, or "path 2"... when that is taken: ".trash/Work/Plan.md", ".trash/Work/Plan 2.md".
   Future<String> _freeInTrash(String path) async {
     final taken = {for (final f in await vault.listIn(trashDir)) f.path.toLowerCase()};
-    final dot = path.length - extOf(path).length;
+    final dot = path.endsWith('.md') ? path.length - 3 : path.length;
     final base = path.substring(0, dot), ext = path.substring(dot);
     var candidate = '$trashDir/$path';
     for (var n = 2; taken.contains(candidate.toLowerCase()) || taken.any((t) => t.startsWith('${candidate.toLowerCase()}/')); n++) {
       candidate = '$trashDir/$base $n$ext';
     }
     return candidate;
-  }
-
-  /// The bookmarked notes that are in the vault, in their order.
-  List<Note> get bookmarked => [for (final p in bookmarks.files) ?_notes[p]];
-
-  bool isBookmarked(Note note) => bookmarks.has(note.path);
-
-  /// Bookmark [note], or take its bookmark off.
-  Future<void> toggleBookmark(Note note) async {
-    await _saveBookmarks(bookmarks.toggled(note.path, now: DateTime.now().millisecondsSinceEpoch));
-  }
-
-  Future<void> _saveBookmarks(Bookmarks next) async {
-    final json = next.toJson();
-    if (json == bookmarks.toJson()) return;
-    bookmarks = next;
-    notifyListeners();
-    await vault.write(Bookmarks.path, '$json\n', mime: 'application/json');
-  }
-
-  /// Bookmarks follow notes that moved ([to] null: gone).
-  Future<void> _bookmarksMoved(Map<String, String?> moves) async {
-    if (moves.keys.any(bookmarks.has)) await _saveBookmarks(bookmarks.moved(moves));
   }
 
   /// Notes that mention [note]'s title (as a word) without linking to it: Obsidian's unlinked mentions.
@@ -456,30 +426,6 @@ class Notebook extends ChangeNotifier {
     return all[(seed ?? DateTime.now().microsecondsSinceEpoch) % all.length];
   }
 
-  /// The canvases and bases directly in [folder].
-  List<VaultFile> othersIn(String folder) => [for (final f in others) if (parentOf(f.path) == folder) f];
-
-  /// A new canvas or base ([suffix] ".canvas", ".base") called [name] in [folder], starting as [text].
-  Future<VaultFile> createFile(String folder, String name, String suffix, String text) async {
-    final base = fileName(name);
-    var path = _join(folder, '$base$suffix');
-    for (var n = 2; others.any((f) => f.path == path); n++) {
-      path = _join(folder, '$base $n$suffix');
-    }
-    final file = await vault.write(path, text, mime: suffix == '.canvas' ? 'application/json' : 'text/yaml');
-    others = [...others, file];
-    notifyListeners();
-    return file;
-  }
-
-  /// Save a canvas or base.
-  Future<VaultFile> saveFile(String path, String text) async {
-    final file = await vault.write(path, text, mime: path.endsWith('.canvas') ? 'application/json' : 'text/yaml');
-    others = [for (final f in others) if (f.path != path) f, file];
-    notifyListeners();
-    return file;
-  }
-
   /// A copy of [note] next to it ("Plan 2").
   Future<Note> duplicate(Note note) => create(note.title, folder: note.folder, text: note.text);
 
@@ -491,46 +437,17 @@ class Notebook extends ChangeNotifier {
     return clean;
   }
 
-  /// Where templates are (Obsidian's Templates plugin setting).
-  String templatesFolder = 'Templates';
-
-  /// Daily notes, as Obsidian's Daily notes plugin sets them: their folder, their name as a Moment date format,
-  /// and the template a new one starts from ('' : the template called "Daily", if there is one).
+  /// Daily notes, as Obsidian's Daily notes plugin sets them: their folder, and their name as a Moment date
+  /// format.
   String dailyFolder = 'Daily';
   String dailyFormat = 'YYYY-MM-DD';
-  String dailyTemplate = '';
-
-  /// Notes in the templates folder.
-  List<Note> get templates =>
-      [for (final n in notes) if (n.folder == templatesFolder || n.folder.startsWith('$templatesFolder/')) n];
 
   /// The daily note's path for [day].
   String dailyPath(DateTime day) =>
       // A format with "/" makes folders, as in Obsidian ("YYYY/MM/YYYY-MM-DD").
       _join(dailyFolder, '${formatMoment(day, dailyFormat).split('/').map(fileName).join('/')}.md');
 
-  /// The daily notes there are, oldest first.
-  List<Note> get dailies =>
-      [for (final n in _notes.values) if (n.folder == dailyFolder || n.folder.startsWith('$dailyFolder/')) n]
-        ..sort((a, b) => a.path.compareTo(b.path));
-
-  /// The daily note before (or after, [step] 1) [note], or null.
-  Note? adjacentDaily(Note note, int step) {
-    final all = dailies;
-    final i = all.indexWhere((n) => n.path == note.path);
-    final j = i + step;
-    return i < 0 || j < 0 || j >= all.length ? null : all[j];
-  }
-
   Future<Note> save(String path, String text) async {
-    final before = _notes[path]?.text;
-    if (before != null && before != text) {
-      try {
-        snapshots?.take(path, before);
-      } on Object {
-        // A copy not kept is no reason to lose the save.
-      }
-    }
     final file = await vault.write(path, text);
     final note = Note(file: file, text: text);
     _notes[file.path] = note;
@@ -543,60 +460,24 @@ class Notebook extends ChangeNotifier {
     return note;
   }
 
-  /// A new note called [title] in [folder], from [template] if given; the
-  /// name gets " 2", " 3"... when taken.
-  Future<Note> create(String title, {String folder = '', Note? template, String text = '', DateTime? now}) async {
+  /// A new note called [title] in [folder]; the name gets " 2", " 3"... when taken.
+  Future<Note> create(String title, {String folder = '', String text = ''}) async {
     final base = fileName(title);
     var name = base;
     for (var n = 2; _notes.containsKey(_join(folder, '$name.md')); n++) {
       name = '$base $n';
     }
-    final body = template == null ? text : applyTemplate(template.text, title: name, now: now ?? DateTime.now());
-    return save(_join(folder, '$name.md'), body);
+    return save(_join(folder, '$name.md'), text);
   }
 
-  /// Today's note in Daily/, made (from Templates/Daily if there is one)
-  /// the first time.
+  /// Today's note, made the first time.
   Future<Note> daily([DateTime? now]) async {
     final day = now ?? DateTime.now();
     final path = dailyPath(day);
     final existing = _notes[path];
     if (existing != null) return existing;
     final title = path.split('/').last.replaceFirst(RegExp(r'\.md$'), '');
-    final template = dailyTemplate.isNotEmpty
-        ? byPath(dailyTemplate.endsWith('.md') ? dailyTemplate : '$dailyTemplate.md') ?? byTitle(dailyTemplate)
-        : templates.where((t) => t.title.toLowerCase() == 'daily').firstOrNull;
-    final text = template == null ? '# $title\n\n' : applyTemplate(template.text, title: title, now: day);
-    return save(path, text);
-  }
-
-  /// A note named by the time, as Obsidian's Unique note creator does ("202611140905"), in [folder].
-  Future<Note> createUnique({String folder = '', String format = 'YYYYMMDDHHmm', DateTime? now}) =>
-      create(formatMoment(now ?? DateTime.now(), format), folder: folder);
-
-  /// Note composer, merge: [source]'s text added to the end of [target] (its properties left behind), links to
-  /// [source] made links to [target], and [source] put in the trash.
-  Future<Note> merge(Note source, Note target) async {
-    final merged = '${target.text.trimRight()}\n\n${withoutProperties(source.text).trim()}\n';
-    await save(target.path, merged);
-    final link = RegExp(r'(!?)\[\[' + RegExp.escape(source.title) + r'((?:#[^\[\]|\n]*)?(?:\|[^\[\]\n]*)?)\]\]', caseSensitive: false);
-    for (final other in [..._notes.values]) {
-      if (other.path != source.path && other.text.contains(link)) {
-        await save(other.path, other.text.replaceAllMapped(link, (m) => '${m[1]}[[${target.title}${m[2]}]]'));
-      }
-    }
-    await trash(_notes[source.path] ?? source);
-    return _notes[target.path]!;
-  }
-
-  /// Note composer, extract: [start]..[end] of [note] made a new note called [title] (next to it), and a link to
-  /// it left in their place. Returns the new note.
-  Future<Note> extract(Note note, int start, int end, String title) async {
-    final part = note.text.substring(start, end).trim();
-    final made = await create(title, folder: note.folder, text: '$part\n');
-    final now = _notes[note.path] ?? note;
-    await save(note.path, now.text.replaceRange(start, end, '[[${made.title}]]'));
-    return made;
+    return save(path, '# $title\n\n');
   }
 
   /// Rename [note] to [title] in its folder; links to it are updated.
@@ -607,7 +488,6 @@ class Notebook extends ChangeNotifier {
     if (_notes.containsKey(path)) throw StateError('A note called "$name" already exists');
     final file = await vault.move(note.file, path);
     _notes.remove(note.path);
-    snapshots?.moved(note.path, path);
     var moved = Note(file: file, text: note.text);
     _notes[path] = moved;
     // A `title:` property that was the old name follows the new one.
@@ -617,7 +497,6 @@ class Notebook extends ChangeNotifier {
     for (final other in [..._notes.values]) {
       if (other.text.contains(old)) await save(other.path, other.text.replaceAllMapped(old, (m) => '[[$name${m[1]}]]'));
     }
-    await _bookmarksMoved({note.path: path});
     _saveCache();
     notifyListeners();
     return moved;

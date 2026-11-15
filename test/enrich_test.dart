@@ -79,32 +79,6 @@ void main() {
     expect(heuristicTitle('...'), '');
   });
 
-  group('emoji for tasks and calendar entries', () {
-    const text = '# 2026-11-14\n\n- [ ] Dentist appointment\n- [x] 💰 Pay the bills\n- 14:00 Gym with Sam\n'
-        '- 09:30-10:00 Standup\n```\n- [ ] not a task\n```\n- note';
-
-    test('tasks without one, anywhere', () {
-      final spots = emojiSpots(text, daily: false);
-      expect([for (final s in spots) s.phrase], ['Dentist appointment']);
-    });
-
-    test('on a daily note, timed entries too, the emoji after the time', () {
-      final spots = emojiSpots(text, daily: true);
-      expect([for (final s in spots) s.phrase], ['Dentist appointment', 'Gym with Sam', 'Standup']);
-      var out = text;
-      out = withEmoji(out, spots[0], '🦷');
-      out = withEmoji(out, spots[1], '🏋️');
-      expect(out, contains('- [ ] 🦷 Dentist appointment\n'));
-      expect(out, contains('- 14:00 🏋️ Gym with Sam\n'));
-    });
-
-    test('a line changed since Emo was asked is left alone', () {
-      final spot = emojiSpots(text, daily: false).single;
-      final edited = text.replaceFirst('Dentist appointment', 'Dentist on Monday');
-      expect(withEmoji(edited, spot, '🦷'), edited);
-    });
-  });
-
   test('the heading follows a new title, a user\'s own heading kept', () {
     expect(withHeading('# Recording 2026-11-14 09:05\n\nx', 'Recording 2026-11-14 0905', 'Launch moves to Thursday'),
         '# Launch moves to Thursday\n\nx');

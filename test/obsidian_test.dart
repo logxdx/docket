@@ -48,7 +48,6 @@ void main() {
     expect(sectionOf(text, 'Missing'), isNull);
     expect(blockOf(text, 'go'), 'Do it');
     expect(blockOf(text, 'b2'), '- two');
-    expect(headingsOf('# A\n```\n# not\n```\n## B'), [(level: 1, title: 'A', line: 0), (level: 2, title: 'B', line: 4)]);
   });
 
   test('the note page cuts callouts, embeds and images into parts of their own', () {
