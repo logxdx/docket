@@ -63,6 +63,9 @@ class _NoteScreenState extends State<NoteScreen> {
   Timer? _save;
   String _saved = '';
 
+  /// Whether the note had something in it when opened: left empty, it goes to the trash rather than away.
+  bool _hadText = false;
+
   /// Note titles to offer while the cursor is inside an open [[.
   List<String> _suggest = const [];
 
@@ -236,6 +239,7 @@ class _NoteScreenState extends State<NoteScreen> {
     if (_saved.isEmpty && _text.text.isEmpty) {
       final note = _book.byPath(_path);
       _text.text = _saved = _last = note?.text ?? '';
+      _hadText = !Notebook.isBlank(_saved);
       _editing = !_book.readOnly && (widget.startEditing || _saved.trim().isEmpty);
     }
     if (_summaries == null) ServicesScope.of(context).opened(_path);
@@ -352,7 +356,12 @@ class _NoteScreenState extends State<NoteScreen> {
     final enricher = _enricher;
     final path = _path;
     final edited = _edited && !_book.readOnly;
-    if (_text.text != _saved && !_book.readOnly) {
+    // Left empty (and nothing still to be written into it): a new note goes away, a note emptied goes to the
+    // trash.
+    final note = _book.byPath(path);
+    if (!_book.readOnly && note != null && Notebook.isBlank(_text.text) && (_recordings?.edits[path]?.isEmpty ?? true)) {
+      unawaited(_hadText ? _book.trash(note) : _book.deleteNote(note));
+    } else if (_text.text != _saved && !_book.readOnly) {
       unawaited(_book.save(_path, _text.text).then((_) => edited ? enricher.saved(path) : null));
     } else if (edited) {
       unawaited(enricher.saved(path));

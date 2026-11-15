@@ -314,6 +314,19 @@ class Notebook extends ChangeNotifier {
   /// Where deleted notes go, as Obsidian keeps them: a dot-folder in the vault, so nothing is lost at once.
   static const trashDir = '.trash';
 
+  /// Whether [text] holds nothing: blank, or an empty properties block. A note with properties alone (a record
+  /// a base lists) is not empty.
+  static bool isBlank(String text) => withoutProperties(text).trim().isEmpty && propertyKeys(text).isEmpty;
+
+  /// Delete [note] for good, not to the trash: for an empty note left behind.
+  Future<void> deleteNote(Note note) async {
+    await vault.delete(note.file);
+    _notes.remove(note.path);
+    await _bookmarksMoved({note.path: null});
+    _saveCache();
+    notifyListeners();
+  }
+
   /// Move [note] to the trash.
   Future<void> trash(Note note) async {
     // Under its own path, so it can go back where it was.
