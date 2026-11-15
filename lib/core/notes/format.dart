@@ -59,18 +59,61 @@ Edit insertAround(Edit e, String open, [String close = '']) {
   );
 }
 
-/// A web link: [label] linking to [url] in place of the selection, the cursor after it. Without a label the
-/// address shows as it is (<https://…>), as Obsidian writes a bare link.
+/// A web link, as Markdown writes one: [label](url), in place of the selection, the cursor after it. Without a
+/// label, the address without its "https://" is the label: [example.com](https://example.com).
 Edit insertWebLink(Edit e, String label, String url) {
   var address = url.trim().replaceAll(' ', '%20');
   // "example.com" is a web address: https:// in front, as a browser would.
   if (!RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]*:').hasMatch(address)) address = 'https://$address';
-  final link = label.trim().isEmpty ? '<$address>' : '[${label.trim().replaceAll(']', r'\]')}]($address)';
+  final shown = label.trim().isNotEmpty
+      ? label.trim()
+      : address.replaceFirst(RegExp(r'^(https?://|mailto:)'), '').replaceFirst(RegExp(r'/$'), '');
+  final link = '[${shown.replaceAll(']', r'\]')}]($address)';
   // Not run into the word before it.
   final spaced = e.start > 0 && !RegExp(r'[\s(\[]').hasMatch(e.text[e.start - 1]) ? ' $link' : link;
   final at = e.start + spaced.length;
   return (text: e.text.replaceRange(e.start, e.end, spaced), start: at, end: at);
 }
+
+/// Where the links are in [text], as the editor colours them: [[note links]], [label](url) links, and web
+/// addresses written as they are (https://…, <https://…>). Start and end of each.
+List<(int, int)> linkRanges(String text) => [
+      for (final m in _anyLink.allMatches(text)) (m.start, m.end),
+    ];
+
+final _anyLink = RegExp(
+  r'!?\[\[[^\[\]\n]+\]\]'
+  r'|!?\[[^\[\]\n]*\]\([^()\s]+\)'
+  r'|<(?:https?://|mailto:)[^>\s]+>'
+  r"|(?:https?://|www\.)[^\s<>()\[\]]*[^\s<>()\[\].,;:!?'\x22]",
+);
+
+/// [text] for reading with its bare web addresses (https://…, www.…, <https://…>) made links, as Obsidian shows
+/// them; addresses already in a link, and code, left alone.
+String autoLinks(String text) {
+  final out = StringBuffer();
+  var at = 0;
+  for (final m in _codeOrLink.allMatches(text)) {
+    out.write(text.substring(at, m.start));
+    final bare = m[1] ?? m[2];
+    if (bare == null) {
+      out.write(m[0]); // code, or a link already
+    } else {
+      final href = bare.startsWith('www.') ? 'https://$bare' : bare;
+      out.write('[${bare.replaceFirst(RegExp(r'^(https?://|mailto:)'), '')}]($href)');
+    }
+    at = m.end;
+  }
+  out.write(text.substring(at));
+  return out.toString();
+}
+
+final _codeOrLink = RegExp(
+  r'```[\s\S]*?```|`[^`\n]*`'
+  r'|!?\[\[[^\[\]\n]+\]\]|!?\[[^\[\]\n]*\]\([^()\s]*\)'
+  r'|<((?:https?://|mailto:)[^>\s]+)>'
+  r"|((?:https?://|www\.)[^\s<>()\[\]]*[^\s<>()\[\].,;:!?'\x22])",
+);
 
 final _listItem = RegExp(r'^(\s*)([-*+]|(\d+)([.)]))(\s+)(\[[ xX]\]\s+)?(.*)$');
 

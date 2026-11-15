@@ -29,6 +29,7 @@ import '../settings/settings_tiles.dart';
 import 'audio_player.dart';
 import 'markdown_view.dart';
 import 'navigation.dart';
+import 'note_text.dart';
 import 'note_tools.dart';
 import '../../core/notes/fuzzy.dart';
 import '../../core/notes/obsidian.dart' show countWords, forReading;
@@ -55,7 +56,7 @@ class NoteScreen extends StatefulWidget {
 class _NoteScreenState extends State<NoteScreen> {
   late String _path = widget.path;
   late bool _editing;
-  final _text = TextEditingController();
+  final _text = NoteTextController();
   final _undo = UndoHistoryController();
   Timer? _save;
   String _saved = '';
@@ -701,6 +702,7 @@ class _NoteScreenState extends State<NoteScreen> {
     final note = book.byPath(_path);
     final theme = Theme.of(context);
     final backlinks = note == null ? const <Note>[] : book.backlinks(note);
+    _text.linkColor = Accent.of(context);
     final headingsSeen = <String, int>{};
     final readOnly = book.readOnly;
     final prompts = readOnly || book.dailyPath(DateTime.now()) != _path ? const <String>[] : promptsFor(DateTime.now(), _text.text);

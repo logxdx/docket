@@ -10,6 +10,7 @@ import 'package:gpt_markdown/gpt_markdown.dart';
 
 import '../../app/safe_image.dart';
 import '../../app/theme.dart';
+import '../../core/notes/format.dart';
 import '../../core/notes/notebook.dart';
 import '../../core/notes/obsidian.dart';
 import '../../core/notes/properties.dart';
@@ -80,7 +81,7 @@ class NoteMarkdown extends StatelessWidget {
     final theme = Theme.of(context);
     final accent = Accent.of(context);
     return GptMarkdown(
-      wikiLinks(forReading(text)),
+      wikiLinks(autoLinks(forReading(text))),
       style: theme.textTheme.bodyLarge,
       imageBuilder: safeMarkdownImage,
       useDollarSignsForLatex: true,

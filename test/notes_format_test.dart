@@ -74,12 +74,26 @@ void main() {
   test('web links: the selection as the label, else the bare address', () {
     expect(insertWebLink((text: 'see docs here', start: 4, end: 8), 'docs', 'https://x.dev/a b').text,
         'see [docs](https://x.dev/a%20b) here');
-    final bare = insertWebLink((text: 'go ', start: 3, end: 3), '', 'https://x.dev');
-    expect(bare.text, 'go <https://x.dev>');
+    final bare = insertWebLink((text: 'go ', start: 3, end: 3), '', 'https://x.dev/');
+    expect(bare.text, 'go [x.dev](https://x.dev/)');
     expect(bare.start, bare.text.length);
     // After a word: a space first. No scheme: https://.
-    expect(insertWebLink((text: 'two', start: 3, end: 3), '', 'example.com').text, 'two <https://example.com>');
+    expect(insertWebLink((text: 'two', start: 3, end: 3), '', 'example.com').text, 'two [example.com](https://example.com)');
     expect(insertWebLink((text: '', start: 0, end: 0), 'mail', 'mailto:a@b.c').text, '[mail](mailto:a@b.c)');
+  });
+
+  test('links found for the editor to colour: note links, Markdown links, web addresses', () {
+    const t = 'See [[Plan]], [docs](https://x.dev/a), https://y.org/b. and <https://z.io> or www.w.com, not this.';
+    expect([for (final (s, e) in linkRanges(t)) t.substring(s, e)],
+        ['[[Plan]]', '[docs](https://x.dev/a)', 'https://y.org/b', '<https://z.io>', 'www.w.com']);
+  });
+
+  test('bare web addresses become links for reading; links and code left alone', () {
+    expect(autoLinks('Go to https://y.org/b. Now'), 'Go to [y.org/b](https://y.org/b). Now');
+    expect(autoLinks('<https://z.io> and www.w.com'), '[z.io](https://z.io) and [www.w.com](https://www.w.com)');
+    expect(autoLinks('[docs](https://x.dev) [[Plan]] `https://code.io` ![pic](https://p.io/a.png)'),
+        '[docs](https://x.dev) [[Plan]] `https://code.io` ![pic](https://p.io/a.png)');
+    expect(autoLinks('```\nhttps://fenced.io\n```'), '```\nhttps://fenced.io\n```');
   });
 
   test('tasks tick by number, code blocks left alone', () {
