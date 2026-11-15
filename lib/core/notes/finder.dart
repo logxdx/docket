@@ -115,16 +115,21 @@ final _wikiPicture = RegExp(r'!\[\[([^\[\]|]+\.(?:png|jpe?g|gif|webp|bmp|svg|avi
 final _mdPicture = RegExp(r'!\[([^\]]*)\]\(([^()\s]+\.(?:png|jpe?g|gif|webp|bmp|svg|avif))\)', caseSensitive: false);
 final _taskLine = RegExp(r'^\s*[-*+] \[(.)\]\s+(.*)$');
 
+/// A line's Markdown marks: a list's, a task's, a heading's, a quote's.
+final _marks = RegExp(r'^\s*(?:[-*+]\s+(?:\[.\]\s+)?|\d+[.)]\s+|#{1,6}\s+|>\s*)');
+
 /// The pictures in [text]: name, alt text, and the line they are on with the lines around it.
 List<({String name, String alt, String around})> picturesIn(String text) {
   final lines = text.split('\n');
   final out = <({String name, String alt, String around})>[];
   for (var i = 0; i < lines.length; i++) {
+    // Its caption: words on its own line, else the line before it, else the one after; as plain words.
+    String plain(String l) => l.replaceAll(_wikiPicture, '').replaceAll(_mdPicture, '').replaceFirst(_marks, '').trim();
     final around = [
-      if (i > 0) lines[i - 1],
-      lines[i].replaceAll(_wikiPicture, '').replaceAll(_mdPicture, ''),
-      if (i + 1 < lines.length) lines[i + 1],
-    ].map((l) => l.trim()).where((l) => l.isNotEmpty && !l.startsWith('![')).join(' ');
+      plain(lines[i]),
+      if (i > 0) plain(lines[i - 1]),
+      if (i + 1 < lines.length) plain(lines[i + 1]),
+    ].firstWhere((l) => l.isNotEmpty, orElse: () => '');
     for (final m in _wikiPicture.allMatches(lines[i])) {
       final alt = m[2] ?? '';
       out.add((name: m[1]!.trim(), alt: RegExp(r'^\d+(x\d+)?$').hasMatch(alt) ? '' : alt, around: around));

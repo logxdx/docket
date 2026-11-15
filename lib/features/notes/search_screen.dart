@@ -246,6 +246,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: ChoiceChip(
+                      showCheckmark: false,
                       avatar: Icon(icon, size: 18),
                       label: Text(name),
                       selected: _filters.kind == k,

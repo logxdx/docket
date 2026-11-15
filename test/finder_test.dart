@@ -54,6 +54,8 @@ void main() {
   test('pictures: by name, alt text, or the words next to them', () {
     expect(searchVault(book, 'harbour', const SearchFilters(kind: Kind.pictures)).cast<PictureHit>().single.name, 'harbour.jpg');
     expect(searchVault(book, 'hotel', const SearchFilters(kind: Kind.pictures)).cast<PictureHit>().single.name, 'harbour.jpg');
+    expect(searchVault(book, 'hotel', const SearchFilters(kind: Kind.pictures)).cast<PictureHit>().single.caption,
+        'The view from the hotel:', reason: 'the line before it, not the task after');
     expect(searchVault(book, 'sunset', const SearchFilters(kind: Kind.pictures)).cast<PictureHit>().single.caption,
         'Sunset over the bay');
     expect(searchVault(book, '', const SearchFilters(kind: Kind.pictures)).length, 2);
