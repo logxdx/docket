@@ -78,7 +78,6 @@ void main() {
       expect(folder, 'Archive/Work/2025');
       expect(book.archivedFoldersIn('Archive/Work'), ['Archive/Work/2025']);
       expect(book.archivedNotesIn('Archive/Work').map((n) => n.title), ['Plan']);
-      expect(book.hasArchive, isTrue);
 
       // A note of that name made meanwhile: the one coming back is "Plan 2".
       await book.create('Plan', folder: 'Work', text: 'new');
@@ -90,6 +89,29 @@ void main() {
       await book.archive(book.byPath('Work/Plan.md')!);
       await book.archive(book.byPath('Work/Plan 2.md')!);
       expect(book.archivedNotesIn('Archive/Work').map((n) => n.title), ['Plan', 'Plan 2']);
+    });
+
+    test('a folder archived after one of its notes: merged with it there, nothing left behind or lost', () async {
+      await book.create('Done', folder: 'Trip', text: 'a');
+      await book.create('Plan', folder: 'Trip', text: 'b');
+      await book.create('Plan', folder: 'Trip/Days', text: 'c');
+      File('${dir.path}/vault/Trip/Recording.m4a').writeAsStringSync('audio');
+      await book.archive(book.byPath('Trip/Done.md')!);
+      // A note called Plan already archived from elsewhere in Trip: the folder's own Plan is numbered.
+      await book.save('Archive/Trip/Plan.md', 'older');
+      expect(await book.archiveFolder('Trip'), 'Archive/Trip');
+      expect(book.archivedFoldersIn('Archive'), ['Archive/Trip']);
+      expect(book.archivedNotesIn('Archive/Trip').map((n) => n.title), ['Done', 'Plan', 'Plan 2']);
+      expect(book.byPath('Archive/Trip/Days/Plan.md')?.text, 'c');
+      expect(File('${dir.path}/vault/Archive/Trip/Recording.m4a').existsSync(), isTrue, reason: 'audio goes too');
+      expect(Directory('${dir.path}/vault/Trip').existsSync(), isFalse);
+      expect(book.folders, isNot(contains('Trip')));
+      // And back: merged into a Trip made meanwhile.
+      await book.create('New', folder: 'Trip', text: 'd');
+      expect(await book.unarchiveFolder('Archive/Trip'), 'Trip');
+      expect([for (final n in book.notesIn('Trip')) n.title]..sort(), ['Done', 'New', 'Plan', 'Plan 2']);
+      expect(book.archivedNotesIn('Archive'), isEmpty);
+      expect(book.archivedFoldersIn('Archive'), isEmpty);
     });
   });
 }

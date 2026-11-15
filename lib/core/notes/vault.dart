@@ -63,6 +63,11 @@ abstract class Vault {
   /// Delete the folder [path] and everything in it.
   Future<void> deleteFolder(String path);
 
+  /// Everything in the folder [from] (notes, their audio and pictures, folders) into the folder [to], which may
+  /// exist already: folders of the same name merged, a file whose name is taken there numbered ("Plan 2.md").
+  /// [from] is gone afterwards. Returns where each note went (old path -> new).
+  Future<Map<String, String>> mergeFolder(String from, String to);
+
   /// The notes in [folder] (a dot-folder such as .trash, which [list] skips), recursively.
   Future<List<VaultFile>> listIn(String folder);
 
@@ -200,6 +205,50 @@ class LocalVault implements Vault {
   }
 
   @override
+  Future<Map<String, String>> mergeFolder(String from, String to) async {
+    final moved = <String, String>{};
+    Future<void> merge(String f, String t) async {
+      final target = Directory('${root.path}/$t');
+      await target.create(recursive: true);
+      for (final e in Directory('${root.path}/$f').listSync(followLinks: false)) {
+        final name = e.path.split('/').last;
+        if (e is Directory) {
+          if (Directory('${target.path}/$name').existsSync()) {
+            await merge('$f/$name', '$t/$name');
+          } else {
+            await e.rename('${target.path}/$name');
+            for (final g in Directory('${target.path}/$name').listSync(recursive: true, followLinks: false)) {
+              if (g is File && g.path.endsWith('.md')) {
+                final rel = g.path.substring(target.path.length + 1);
+                moved['$f/$rel'] = '$t/$rel';
+              }
+            }
+          }
+        } else if (e is File) {
+          final free = _freeName(target, name);
+          await e.rename('${target.path}/$free');
+          if (name.endsWith('.md')) moved['$f/$name'] = '$t/$free';
+        }
+      }
+      await Directory('${root.path}/$f').delete();
+    }
+
+    await merge(from, to);
+    return moved;
+  }
+
+  /// [name], or "name 2", "name 3"... when [dir] has it.
+  static String _freeName(Directory dir, String name) {
+    final dot = name.lastIndexOf('.');
+    final stem = dot > 0 ? name.substring(0, dot) : name, ext = dot > 0 ? name.substring(dot) : '';
+    var free = name;
+    for (var n = 2; File('${dir.path}/$free').existsSync() || Directory('${dir.path}/$free').existsSync(); n++) {
+      free = '$stem $n$ext';
+    }
+    return free;
+  }
+
+  @override
   Future<Uint8List?> readBytes(String path) async {
     final file = _file(path);
     return file.existsSync() ? file.readAsBytes() : null;
@@ -268,6 +317,9 @@ class ReadOnlyVault implements Vault {
 
   @override
   Future<void> deleteFolder(String path) async => throw const ReadOnlyNotes();
+
+  @override
+  Future<Map<String, String>> mergeFolder(String from, String to) async => throw const ReadOnlyNotes();
 
   @override
   Future<List<VaultFile>> listIn(String folder) => inner.listIn(folder);

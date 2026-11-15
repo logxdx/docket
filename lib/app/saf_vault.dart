@@ -158,6 +158,55 @@ class SafVault implements Vault {
   }
 
   @override
+  Future<Map<String, String>> mergeFolder(String from, String to) async {
+    final moved = <String, String>{};
+    Future<void> notesIn(String uri, String was, String now) async {
+      for (final c in await _util.list(uri)) {
+        if (c.isDir) {
+          await notesIn(c.uri, '$was/${c.name}', '$now/${c.name}');
+        } else if (c.name.endsWith('.md')) {
+          moved['$was/${c.name}'] = '$now/${c.name}';
+        }
+      }
+    }
+
+    Future<void> merge(String f, String t) async {
+      final source = await _dir(f);
+      if (source == null) return;
+      final target = (await _util.mkdirp(treeUri, t.split('/'))).uri;
+      final taken = {for (final c in await _util.list(target)) c.name: c};
+      for (final c in await _util.list(source)) {
+        final there = taken[c.name];
+        if (c.isDir && there != null && there.isDir) {
+          await merge('$f/${c.name}', '$t/${c.name}');
+          continue;
+        }
+        var name = c.name;
+        if (there != null) {
+          final dot = c.isDir ? -1 : name.lastIndexOf('.');
+          final stem = dot > 0 ? name.substring(0, dot) : name, ext = dot > 0 ? name.substring(dot) : '';
+          for (var n = 2; taken.containsKey(name); n++) {
+            name = '$stem $n$ext';
+          }
+        }
+        // Named free first, so the provider never picks a name of its own.
+        final uri = name == c.name ? c.uri : (await _util.rename(c.uri, c.isDir, name)).uri;
+        final landed = await _util.moveTo(uri, c.isDir, source, target);
+        taken[name] = landed;
+        if (c.isDir) {
+          await notesIn(landed.uri, '$f/${c.name}', '$t/$name');
+        } else if (name.endsWith('.md')) {
+          moved['$f/${c.name}'] = '$t/$name';
+        }
+      }
+      await _util.delete(source, true);
+    }
+
+    await merge(from, to);
+    return moved;
+  }
+
+  @override
   Future<Uint8List?> readBytes(String path) async {
     final file = await _util.child(treeUri, path.split('/'));
     return file == null || file.isDir ? null : _stream.readFileBytes(file.uri);

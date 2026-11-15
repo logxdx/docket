@@ -223,9 +223,6 @@ class Notebook extends ChangeNotifier {
   List<Note> archivedNotesIn(String folder) =>
       [for (final n in _notes.values) if (n.folder == folder) n]..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
 
-  /// Whether anything is archived.
-  bool get hasArchive => _allFolders.contains(archiveDir) || _notes.keys.any(isArchived);
-
   /// [note] into the archive, under its folder there.
   Future<Note> archive(Note note) => _moveFree(note, _join(archiveDir, note.folder));
 
@@ -249,14 +246,20 @@ class Notebook extends ChangeNotifier {
     return moveNote(note, folder);
   }
 
-  /// The folder [from] to [to], as "to 2" when that is taken.
+  /// The folder [from] to [to]; when [to] is there already (a note archived from the folder before it), merged
+  /// into it, a name taken there numbered.
   Future<String> _moveFolderFree(String from, String to) async {
-    var free = to;
-    for (var n = 2; _allFolders.contains(free); n++) {
-      free = '$to $n';
+    if (!_allFolders.contains(to)) {
+      await moveFolder(from, to);
+      return to;
     }
-    await moveFolder(from, free);
-    return free;
+    final moved = await vault.mergeFolder(from, to);
+    _folders.removeWhere((f) => f == from || f.startsWith('$from/'));
+    _notes.removeWhere((path, _) => path.startsWith('$from/'));
+    await refresh();
+    await _relinkPaths({for (final e in moved.entries) _noExt(e.key): _noExt(e.value)});
+    // A note renamed on the way ("Plan 2"): [[Plan]] links stay with the one that kept the name.
+    return to;
   }
 
   /// The folders directly in [parent] ('' for the top).
