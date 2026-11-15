@@ -124,14 +124,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   /// Daily notes as Obsidian's plugin sets them: folder, name format (Moment), template.
+  /// One dialog for all three; Cancel leaves them as they were.
   Future<void> _dailySettings() async {
-    await _ask('daily.folder', 'Daily notes folder', _s.notebook.dailyFolder, 'Where daily notes go; empty: the top folder.');
-    if (!mounted) return;
-    await _ask('daily.format', 'Daily note name', _s.notebook.dailyFormat,
-        'A date format, as in Obsidian: YYYY-MM-DD, dddd D MMMM YYYY, YYYY/MM/YYYY-MM-DD (folders by month)…');
-    if (!mounted) return;
-    await _ask('daily.template', 'Daily note template', _s.notebook.dailyTemplate,
-        'A template\'s name or path, such as Templates/Daily; empty: the template called "Daily", if there is one.');
+    final book = _s.notebook;
+    final fields = [
+      ('daily.folder', 'Folder', book.dailyFolder, 'Where daily notes go; empty: the top folder.'),
+      ('daily.format', 'Name', book.dailyFormat,
+          'A date format, as in Obsidian: YYYY-MM-DD, dddd D MMMM YYYY, YYYY/MM/YYYY-MM-DD (folders by month)…'),
+      ('daily.template', 'Template', book.dailyTemplate,
+          'A template\'s name or path, such as Templates/Daily; empty: the template called "Daily", if there is one.'),
+    ];
+    final controllers = [for (final f in fields) TextEditingController(text: f.$3)];
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Daily notes'),
+        scrollable: true,
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          for (final (i, f) in fields.indexed) ...[
+            if (i > 0) const SizedBox(height: 18),
+            TextField(controller: controllers[i], decoration: InputDecoration(labelText: f.$2)),
+            const SizedBox(height: 6),
+            Text(f.$4, style: Theme.of(context).textTheme.bodySmall),
+          ],
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (saved == true) {
+      for (final (i, f) in fields.indexed) {
+        _s.setNotesSetting(f.$1, controllers[i].text);
+      }
+    }
+    for (final c in controllers) {
+      c.dispose();
+    }
+    if (mounted) setState(() {});
   }
 
   Future<void> _pickTranscriber() async {

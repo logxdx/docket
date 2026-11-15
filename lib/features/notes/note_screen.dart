@@ -449,15 +449,27 @@ class _NoteScreenState extends State<NoteScreen> {
     _changed(_text.text);
   }
 
-  /// [snippet] where the cursor is (at the end when the editor has none), the editor opened.
-  void _insert(String snippet) {
+  /// The editor open and focused, so a change made from a menu can be undone (Flutter's undo history only
+  /// follows a focused field).
+  Future<void> _focusEditor() async {
+    if (!_editing) setState(() => _editing = true);
+    if (_focus.hasFocus) return;
+    _focus.requestFocus();
+    await WidgetsBinding.instance.endOfFrame;
+  }
+
+  /// [snippet] where the cursor is (at the end when the editor has none), the editor opened; a [block] (a
+  /// template) starts on a line of its own.
+  Future<void> _insert(String snippet, {bool block = false}) async {
+    await _focusEditor();
+    if (!mounted) return;
     final value = _text.value;
     final at = value.selection.isValid ? value.selection.start : value.text.length;
     final end = value.selection.isValid ? value.selection.end : at;
-    setState(() => _editing = true);
+    final text = block && at > 0 && value.text[at - 1] != '\n' ? '\n$snippet' : snippet;
     _text.value = TextEditingValue(
-      text: value.text.replaceRange(at, end, snippet),
-      selection: TextSelection.collapsed(offset: at + snippet.length),
+      text: value.text.replaceRange(at, end, text),
+      selection: TextSelection.collapsed(offset: at + text.length),
     );
     _changed(_text.text);
   }
@@ -493,6 +505,8 @@ class _NoteScreenState extends State<NoteScreen> {
       ),
     );
     if (picked == null || !mounted) return;
+    await _focusEditor();
+    if (!mounted) return;
     final title = _book.byPath(_path)?.title ?? '';
     final filled = applyTemplate(picked.text, title: title, now: DateTime.now());
     var text = _text.text;
@@ -509,7 +523,7 @@ class _NoteScreenState extends State<NoteScreen> {
         selection: sel.isValid ? TextSelection.collapsed(offset: sel.start + shift) : TextSelection.collapsed(offset: text.length),
       );
     }
-    _insert(withoutProperties(filled));
+    await _insert(withoutProperties(filled), block: true);
   }
 
   /// A picture from the phone, copied into the vault's attachments folder and embedded at the cursor.
@@ -538,7 +552,7 @@ class _NoteScreenState extends State<NoteScreen> {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('The picture could not be added: $e')));
       return;
     }
-    _insert('![[$name]]\n');
+    await _insert('![[$name]]\n');
   }
 
   /// Note composer: this note's text added to another, and this one put in the trash.

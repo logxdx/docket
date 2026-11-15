@@ -342,7 +342,9 @@ class _Edges extends CustomPainter {
   final Offset origin;
   final Color color;
 
-  Offset _side(CanvasNode n, String? side, Offset toward) {
+  /// Where an edge meets [n]: the middle of [side], or of the side facing [toward] when the file names none;
+  /// and the way out of that side.
+  (Offset, Offset) _side(CanvasNode n, String? side, Offset toward) {
     final r = Rect.fromLTWH(n.x + origin.dx, n.y + origin.dy, n.width, n.height);
     final s = side ??
         () {
@@ -350,10 +352,10 @@ class _Edges extends CustomPainter {
           return d.dx.abs() * r.height > d.dy.abs() * r.width ? (d.dx > 0 ? 'right' : 'left') : (d.dy > 0 ? 'bottom' : 'top');
         }();
     return switch (s) {
-      'top' => r.topCenter,
-      'bottom' => r.bottomCenter,
-      'left' => r.centerLeft,
-      _ => r.centerRight,
+      'top' => (r.topCenter, const Offset(0, -1)),
+      'bottom' => (r.bottomCenter, const Offset(0, 1)),
+      'left' => (r.centerLeft, const Offset(-1, 0)),
+      _ => (r.centerRight, const Offset(1, 0)),
     };
   }
 
@@ -364,31 +366,37 @@ class _Edges extends CustomPainter {
       if (a == null || b == null) continue;
       final ca = Offset(a.x + a.width / 2, a.y + a.height / 2) + origin;
       final cb = Offset(b.x + b.width / 2, b.y + b.height / 2) + origin;
-      final p = _side(a, e.fromSide, cb), q = _side(b, e.toSide, ca);
+      final (p, outA) = _side(a, e.fromSide, cb);
+      final (q, outB) = _side(b, e.toSide, ca);
       final tint = canvasColor(e.color);
       final paint = Paint()
         ..color = tint != null ? Color(tint) : color
         ..strokeWidth = 2
         ..style = PaintingStyle.stroke;
-      final mid = (p + q) / 2;
+      // Out of each side, then bending toward the other, as JSON Canvas edges are drawn.
+      final reach = min(150.0, max(30.0, (q - p).distance / 2));
+      final c1 = p + outA * reach, c2 = q + outB * reach;
       final path = Path()
         ..moveTo(p.dx, p.dy)
-        ..quadraticBezierTo(mid.dx, p.dy, mid.dx, mid.dy)
-        ..quadraticBezierTo(mid.dx, q.dy, q.dx, q.dy);
+        ..cubicTo(c1.dx, c1.dy, c2.dx, c2.dy, q.dx, q.dy);
       canvas.drawPath(path, paint);
-      void arrow(Offset tip, Offset from) {
-        final dir = (tip - from) / max(1, (tip - from).distance);
+      // An arrowhead pointing into the side it reaches.
+      void arrow(Offset tip, Offset out) {
+        final dir = -out;
         final normal = Offset(-dir.dy, dir.dx);
+        final back = tip - dir * 12;
         final head = Path()
           ..moveTo(tip.dx, tip.dy)
-          ..lineTo((tip - dir * 12 + normal * 6).dx, (tip - dir * 12 + normal * 6).dy)
-          ..lineTo((tip - dir * 12 - normal * 6).dx, (tip - dir * 12 - normal * 6).dy)
+          ..lineTo((back + normal * 6).dx, (back + normal * 6).dy)
+          ..lineTo((back - normal * 6).dx, (back - normal * 6).dy)
           ..close();
         canvas.drawPath(head, Paint()..color = paint.color);
       }
 
-      if (e.arrowAtEnd) arrow(q, Offset(mid.dx, q.dy));
-      if (e.arrowAtStart) arrow(p, Offset(mid.dx, p.dy));
+      if (e.arrowAtEnd) arrow(q, outB);
+      if (e.arrowAtStart) arrow(p, outA);
+      // The curve's middle, for its label.
+      final mid = (p + c1 * 3 + c2 * 3 + q) / 8;
       if (e.label.isNotEmpty) {
         final tp = TextPainter(
           text: TextSpan(text: e.label, style: TextStyle(color: paint.color, fontSize: 13)),
