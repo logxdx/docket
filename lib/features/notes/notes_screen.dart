@@ -440,13 +440,44 @@ class _NotesScreenState extends State<NotesScreen> {
         final folder = await services.pickFolder(write: choice == 'pick');
         if (folder != null) await services.useVault(folder.uri, name: folder.name, readOnly: choice == 'pick-read');
         _go('');
-      case 'lock' || 'unlock':
-        services.setNotesReadOnly(choice == 'lock');
+      case 'lock':
+        services.setNotesReadOnly(true);
+      case 'unlock':
+        await _unlock();
       case 'local':
         await services.useVault(null);
         _go('');
     }
     if (mounted) setState(() {});
+  }
+
+  /// The picked folder made editable. A folder picked to read only was never allowed changes by Android: it is
+  /// picked again, allowing them.
+  Future<void> _unlock() async {
+    final services = _s;
+    if (await services.canWritePicked()) {
+      services.setNotesReadOnly(false);
+      return;
+    }
+    if (!mounted) return;
+    final again = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Allow changes'),
+        content: const Text('This folder was opened read only, so Android has not let Docket change its files. '
+            'Pick the same folder again and allow access.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Pick folder')),
+        ],
+      ),
+    );
+    if (again != true) return;
+    final folder = await services.pickFolder(write: true);
+    if (folder == null) return;
+    // The same folder, now writable; or another one, which is used instead.
+    await services.useVault(folder.uri, name: folder.name);
+    _go('');
   }
 
   static Widget _hairline(BuildContext context) =>

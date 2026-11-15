@@ -56,7 +56,7 @@ class Services {
   late final notebook = Notebook(
     _vault(),
     cache: File('${support.path}/notes-index.json'),
-    snapshots: Snapshots(Directory('${support.path}/snapshots')),
+    snapshots: Snapshots(_snapshotsDir()),
   )
     ..templatesFolder = settings.get('notes.templates') ?? 'Templates'
     ..dailyFolder = settings.get('daily.folder') ?? 'Daily'
@@ -82,6 +82,23 @@ class Services {
   /// Where images added to notes go ('' : next to the note).
   String get attachmentsFolder => settings.get('notes.attachments') ?? 'attachments';
 
+  /// A picked folder's own name for what the app keeps about it (file recovery, recent notes); '' for the app's
+  /// own notes, which keep the places they always had. FNV-1a of the folder's address: the same every run.
+  String get _vaultKey {
+    final uri = settings.get('notes.vault') ?? '';
+    if (uri.isEmpty) return '';
+    var h = 0xcbf29ce484222325;
+    for (final c in uri.codeUnits) {
+      h = (h ^ c) * 0x100000001b3;
+    }
+    return h.toUnsigned(64).toRadixString(16);
+  }
+
+  Directory _snapshotsDir() =>
+      Directory(_vaultKey.isEmpty ? '${support.path}/snapshots' : '${support.path}/vault-snapshots/$_vaultKey');
+
+  String get _recentKey => _vaultKey.isEmpty ? 'notes.recent' : 'notes.recent.$_vaultKey';
+
   Vault _vault() {
     final uri = settings.get('notes.vault') ?? '';
     if (uri.isEmpty) return LocalVault(Directory('${documents.path}/Notes'), label: 'this phone');
@@ -105,10 +122,37 @@ class Services {
   /// Keep notes in [uri] (a picked folder), or in the app's own when null;
   /// [readOnly]: never change the folder's files.
   Future<void> useVault(String? uri, {String name = '', bool readOnly = false}) async {
+    final old = settings.get('notes.vault') ?? '';
+    // Android keeps a limited number of folder grants: the one left behind is handed back.
+    if (old.isNotEmpty && old != uri) await _release(old);
     settings.set('notes.vault', uri ?? '');
     settings.set('notes.vaultName', name);
     settings.set('notes.readOnly', uri != null && readOnly ? 'on' : 'off');
+    notebook.snapshots?.dir = _snapshotsDir();
     await notebook.use(_vault());
+  }
+
+  Future<void> _release(String uri) async {
+    try {
+      await SafUtil().releasePersistedPermission(uri, read: true, write: true);
+    } on Object {
+      try {
+        await SafUtil().releasePersistedPermission(uri);
+      } on Object {
+        // Not held any more.
+      }
+    }
+  }
+
+  /// Whether Android lets the app change the picked folder's files: not when it was picked to read only.
+  Future<bool> canWritePicked() async {
+    final uri = settings.get('notes.vault') ?? '';
+    if (uri.isEmpty) return true;
+    try {
+      return await SafUtil().hasPersistedPermission(uri, checkWrite: true);
+    } on Object {
+      return false;
+    }
   }
 
   /// Make the picked folder read only, or editable again.
@@ -169,11 +213,11 @@ class Services {
   }
 
   /// Notes opened lately, newest first: the quick switcher's list before anything is typed.
-  List<String> get recent => [for (final p in (settings.get('notes.recent') ?? '').split('\n')) if (p.isNotEmpty) p];
+  List<String> get recent => [for (final p in (settings.get(_recentKey) ?? '').split('\n')) if (p.isNotEmpty) p];
 
   /// [path] was opened.
   void opened(String path) =>
-      settings.set('notes.recent', [path, ...recent.where((p) => p != path)].take(30).join('\n'));
+      settings.set(_recentKey, [path, ...recent.where((p) => p != path)].take(30).join('\n'));
 
   /// The model server for AI on notes; null until one is set. (Not a model on the phone: the small ones a phone
   /// can run invent and change facts on these jobs, tool/language_models.md.)

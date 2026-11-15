@@ -11,7 +11,8 @@ class Snapshots {
 
   /// The app's own folder for them (not the vault: Obsidian keeps its own, and a synced vault should not carry
   /// them).
-  final Directory dir;
+  /// Changed when another vault is opened: each keeps its own.
+  Directory dir;
 
   /// The least time between two copies of one note.
   final Duration every;
