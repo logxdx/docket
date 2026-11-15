@@ -120,6 +120,13 @@ class OfflineModels(private val context: Context) {
                         }
                     }
                 }
+            } catch (e: java.net.UnknownHostException) {
+                part.delete()
+                throw IllegalStateException("No internet connection: the models come from Hugging Face. Try again when online.")
+            } catch (e: java.io.IOException) {
+                part.delete()
+                // A dropped connection keeps the files done so far: the next try goes on from there.
+                throw IllegalStateException(if (e.message?.contains("stopped") == true) "Download stopped." else "The download was cut off (${e.message}). Try again: it goes on where it stopped.")
             } catch (e: Exception) {
                 part.delete()
                 throw e
