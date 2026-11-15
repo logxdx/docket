@@ -16,21 +16,27 @@ import '../../core/notes/properties.dart';
 List<String> noteNames(Note n) => [n.title, ...propertyList(n.text, 'aliases')];
 
 /// Pick a note by name. With nothing typed: [recent] notes, then bookmarks. A name no note has can be made into
-/// one (unless the vault is read only). Returns the note, or null.
-Future<Note?> showQuickSwitcher(BuildContext context, {required Notebook book, required List<String> recent}) {
+/// one (unless the vault is read only, or [canCreate] is false). [exclude]: a note not to offer (the one being
+/// merged). Returns the note, or null.
+Future<Note?> showQuickSwitcher(BuildContext context,
+    {required Notebook book, required List<String> recent, String? exclude, bool canCreate = true, String? hint}) {
   return showModalBottomSheet<Note>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (context) => _Switcher(book: book, recent: recent),
+    builder: (context) =>
+        _Switcher(book: book, recent: recent, exclude: exclude, canCreate: canCreate && !book.readOnly, hint: hint),
   );
 }
 
 class _Switcher extends StatefulWidget {
-  const _Switcher({required this.book, required this.recent});
+  const _Switcher({required this.book, required this.recent, this.exclude, required this.canCreate, this.hint});
 
   final Notebook book;
   final List<String> recent;
+  final String? exclude;
+  final bool canCreate;
+  final String? hint;
 
   @override
   State<_Switcher> createState() => _SwitcherState();
@@ -69,6 +75,7 @@ class _SwitcherState extends State<_Switcher> {
     } else {
       shown = fuzzyRank(q, book.notes, noteNames).take(40).toList();
     }
+    shown.removeWhere((n) => n.path == widget.exclude);
     final exact = q.isNotEmpty && book.byTitle(q) != null;
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
@@ -85,16 +92,16 @@ class _SwitcherState extends State<_Switcher> {
               onSubmitted: (_) {
                 if (shown.isNotEmpty) {
                   Navigator.pop(context, shown.first);
-                } else if (q.isNotEmpty && !book.readOnly) {
+                } else if (q.isNotEmpty && widget.canCreate) {
                   _create(q);
                 }
               },
-              decoration: const InputDecoration(hintText: 'Open a note…', prefixIcon: Icon(Icons.search_rounded)),
+              decoration: InputDecoration(hintText: widget.hint ?? 'Open a note…', prefixIcon: const Icon(Icons.search_rounded)),
             ),
           ),
           Expanded(
             child: ListView(children: [
-              if (q.isNotEmpty && !exact && !book.readOnly)
+              if (q.isNotEmpty && !exact && widget.canCreate)
                 ListTile(
                   leading: Icon(Icons.note_add_outlined, color: Accent.of(context)),
                   title: Text('Create "$q"', style: TextStyle(color: Accent.of(context))),

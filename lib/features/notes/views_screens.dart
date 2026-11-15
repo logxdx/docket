@@ -144,7 +144,7 @@ class _CanvasScreenState extends State<CanvasScreen> {
   }
 
   Future<void> _addNote() async {
-    final note = await showQuickSwitcher(context, book: _book, recent: ServicesScope.of(context).recent);
+    final note = await showQuickSwitcher(context, book: _book, recent: ServicesScope.of(context).recent, hint: 'Add a note…');
     if (note == null) return;
     final at = _centre();
     _doc!.addFile(at.dx - 200, at.dy - 150, note.path);

@@ -452,10 +452,14 @@ class _NoteScreenState extends State<NoteScreen> {
   /// The editor open and focused, so a change made from a menu can be undone (Flutter's undo history only
   /// follows a focused field).
   Future<void> _focusEditor() async {
-    if (!_editing) setState(() => _editing = true);
+    final opened = !_editing;
+    if (opened) setState(() => _editing = true);
     if (_focus.hasFocus) return;
     _focus.requestFocus();
     await WidgetsBinding.instance.endOfFrame;
+    // A new editor's undo history keeps its first text only after its 500 ms throttle; a change before then
+    // would replace it, leaving nothing to undo.
+    if (opened) await Future<void>.delayed(const Duration(milliseconds: 600));
   }
 
   /// [snippet] where the cursor is (at the end when the editor has none), the editor opened; a [block] (a
@@ -561,7 +565,8 @@ class _NoteScreenState extends State<NoteScreen> {
     if (!mounted) return;
     final source = _book.byPath(_path);
     if (source == null) return;
-    final target = await showQuickSwitcher(context, book: _book, recent: ServicesScope.of(context).recent);
+    final target = await showQuickSwitcher(context,
+        book: _book, recent: ServicesScope.of(context).recent, exclude: source.path, canCreate: false, hint: 'Merge into…');
     if (target == null || target.path == source.path || !mounted) return;
     final sure = await showDialog<bool>(
       context: context,
