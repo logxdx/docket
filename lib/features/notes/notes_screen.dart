@@ -152,7 +152,9 @@ class _NotesScreenState extends State<NotesScreen> {
       builder: (context) => AlertDialog(
         title: Text('Move ${_countLabel()} to the trash?'),
         content: Text([
-          if (inside > 0) 'The folders hold $inside note${inside == 1 ? '' : 's'}, which go too.',
+          if (inside > 0)
+            '${folders.length == 1 ? 'The folder holds' : 'The folders hold'} '
+                '${inside == 1 ? '1 note, which goes' : '$inside notes, which go'} too.',
           '${_selected.length == 1 ? 'It goes' : 'They go'} to the vault\'s .trash folder, as in Obsidian: restore '
               '${_selected.length == 1 ? 'it' : 'them'} from Trash in the menu.',
         ].join(' ')),
