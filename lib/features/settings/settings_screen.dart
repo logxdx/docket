@@ -20,7 +20,7 @@ import 'models_screen.dart';
 part 'ai_screen.dart';
 
 /// The app's version, as pubspec.yaml has it.
-const appVersion = '0.2.0';
+const appVersion = '0.3.0';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
