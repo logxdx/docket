@@ -67,7 +67,7 @@ class Services {
     }
   }
 
-  /// Where images added to notes go ('' : next to the note).
+  /// Where pictures and audio added to notes go ('' : next to the note).
   String get attachmentsFolder => settings.get('notes.attachments') ?? 'attachments';
 
   /// A picked folder's own name for what the app keeps about it (its recent notes); '' for the app's own notes,

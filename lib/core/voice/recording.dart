@@ -38,7 +38,7 @@ final _recordingComment = RegExp(r'^<!-- notes:recording \S+ -->\s*$');
 
 /// A recording's transcript, made on the phone: "## Transcript".
 final _spoken = RegExp(r'^(#{1,6}) Transcript\s*$');
-final _audio = RegExp(r'^!\[\[([^\[\]]+\.(?:m4a|mp3|wav|ogg|opus|webm|aac))\]\]\s*$', caseSensitive: false);
+final _audio = RegExp(r'^!\[\[([^\[\]]+\.(?:m4a|mp3|wav|ogg|opus|webm|aac|flac))\]\]\s*$', caseSensitive: false);
 final _raw = RegExp(r'^(#{1,6}) Raw transcript\s*$');
 final _heading = RegExp(r'^(#{1,6}) ');
 

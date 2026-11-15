@@ -174,10 +174,22 @@ class _NoteScreenState extends State<NoteScreen> {
     setState(() {});
   }
 
-  Playback _playback(String name, String? folder) => _playbacks.putIfAbsent(
-        name,
-        () => Playback(() => _book.vault.locate(folder == null || folder.isEmpty ? name : '$folder/$name')),
-      );
+  /// [name]'s player: the audio beside the note (a recording), or where Obsidian would find it: the attachments
+  /// folder, the vault's top.
+  Playback _playback(String name, String? folder) => _playbacks.putIfAbsent(name, () {
+        final attachments = ServicesScope.of(context).attachmentsFolder;
+        return Playback(() async {
+          for (final path in {
+            if (folder != null && folder.isNotEmpty) '$folder/$name',
+            if (attachments.isNotEmpty) '$attachments/$name',
+            name,
+          }) {
+            final found = await _book.vault.locate(path);
+            if (found != null) return found;
+          }
+          return null;
+        });
+      });
 
   Future<SpokenWords?> _wordsFor(String audio, String? folder) async {
     final path = folder == null || folder.isEmpty ? audio : '$folder/$audio';
@@ -350,10 +362,11 @@ class _NoteScreenState extends State<NoteScreen> {
   }
 
 
-  /// A picture from the phone, copied into the vault's attachments folder and embedded at the cursor.
-  Future<void> _addImage() async {
+  /// A picture or a sound from the phone ([audio]), copied into the vault's attachments folder (Settings › Notes)
+  /// and embedded at the cursor: shown, or played, in the note as Obsidian does.
+  Future<void> _attach({required bool audio}) async {
     final services = ServicesScope.of(context);
-    final picked = await services.ant.pickFile(mime: 'image/*');
+    final picked = await services.ant.pickFile(mime: audio ? 'audio/*' : 'image/*');
     if (picked == null || !mounted) return;
     final note = _book.byPath(_path);
     final folder = services.attachmentsFolder.isEmpty ? (note?.folder ?? '') : services.attachmentsFolder;
@@ -368,20 +381,25 @@ class _NoteScreenState extends State<NoteScreen> {
       '.gif' => 'image/gif',
       '.webp' => 'image/webp',
       '.svg' => 'image/svg+xml',
-      _ => 'image/jpeg',
+      '.m4a' || '.aac' => 'audio/mp4',
+      '.mp3' => 'audio/mpeg',
+      '.wav' => 'audio/wav',
+      '.ogg' || '.opus' => 'audio/ogg',
+      '.flac' => 'audio/flac',
+      '.webm' => 'audio/webm',
+      _ => audio ? 'audio/mp4' : 'image/jpeg',
     };
     try {
       await _book.vault.attach(folder.isEmpty ? name : '$folder/$name', File(picked.path), mime);
     } on Object catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('The picture could not be added: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('The ${audio ? 'audio' : 'picture'} could not be added: $e')));
+      }
       return;
     }
     await _insert('![[$name]]\n');
   }
-
-
-
-
 
   /// A toolbar edit on the text and its selection.
   void _format(Edit Function(Edit) change) {
@@ -691,13 +709,11 @@ class _NoteScreenState extends State<NoteScreen> {
                 'delete' => _delete(),
                 'move' => _move(),
                 'archive' => _archive(),
-                'picture' => _addImage(),
                 'properties' => _properties(),
                 _ => _rename(),
               },
               itemBuilder: (context) => [
                 const PopupMenuItem(value: 'properties', child: Text('Properties')),
-                const PopupMenuItem(value: 'picture', child: Text('Add a picture')),
                 const PopupMenuItem(value: 'rename', child: Text('Rename')),
                 const PopupMenuItem(value: 'move', child: Text('Move to folder')),
                 PopupMenuItem(value: 'archive', child: Text(Notebook.isArchived(_path) ? 'Restore from archive' : 'Archive')),
@@ -759,7 +775,12 @@ class _NoteScreenState extends State<NoteScreen> {
                     ],
                   ]),
                 ),
-              _Toolbar(onFormat: _format, undo: _undo),
+              _Toolbar(
+                onFormat: _format,
+                undo: _undo,
+                onPicture: () => _attach(audio: false),
+                onAudio: () => _attach(audio: true),
+              ),
             ])
           : ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 32), children: [
               if (journal != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: journal),
@@ -954,10 +975,14 @@ class _TranscriptCardState extends State<_TranscriptCard> {
 
 /// Formatting buttons above the keyboard.
 class _Toolbar extends StatelessWidget {
-  const _Toolbar({required this.onFormat, required this.undo});
+  const _Toolbar({required this.onFormat, required this.undo, required this.onPicture, required this.onAudio});
 
   final void Function(Edit Function(Edit)) onFormat;
   final UndoHistoryController undo;
+
+  /// Add a picture, or a sound, from the phone at the cursor.
+  final VoidCallback onPicture;
+  final VoidCallback onAudio;
 
   @override
   Widget build(BuildContext context) {
@@ -973,9 +998,14 @@ class _Toolbar extends StatelessWidget {
       // Clear of the gesture bar when the keyboard is down.
       child: SafeArea(
         top: false,
-        child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
+        // Formatting scrolls; undo and redo stay at the end, always in reach.
         child: Row(children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: [
+          IconButton(tooltip: 'Add a picture', icon: const Icon(Icons.image_outlined, size: 20), onPressed: onPicture),
+          IconButton(tooltip: 'Add audio', icon: const Icon(Icons.audio_file_outlined, size: 20), onPressed: onAudio),
           button('Heading', Icons.title_rounded, (e) => prefixLines(e, '# ')),
           button('Bold', Icons.format_bold_rounded, (e) => wrap(e, '**')),
           button('Italic', Icons.format_italic_rounded, (e) => wrap(e, '*')),
@@ -983,6 +1013,9 @@ class _Toolbar extends StatelessWidget {
           button('Checkbox', Icons.check_box_outlined, (e) => prefixLines(e, '- [ ] ')),
           button('Link a note', Icons.link_rounded, (e) => insertAround(e, '[[', ']]'), tinted: true),
           button('Tag', Icons.tag_rounded, (e) => insertAround(e, '#')),
+              ]),
+            ),
+          ),
           ValueListenableBuilder<UndoHistoryValue>(
             valueListenable: undo,
             builder: (context, value, _) => Row(children: [
@@ -991,7 +1024,6 @@ class _Toolbar extends StatelessWidget {
             ]),
           ),
         ]),
-        ),
       ),
     );
   }

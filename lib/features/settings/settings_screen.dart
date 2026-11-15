@@ -62,9 +62,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _Row('Daily notes',
                   value: _s.notebook.dailyFolder.isEmpty ? _s.notebook.dailyFormat : '${_s.notebook.dailyFolder}/${_s.notebook.dailyFormat}',
                   onTap: _dailySettings),
-              _Row('Pictures go in', value: _s.attachmentsFolder.isEmpty ? 'The note\'s folder' : _s.attachmentsFolder,
-                  onTap: () => _ask('notes.attachments', 'Pictures go in', _s.attachmentsFolder,
-                      'A folder for pictures added to notes; empty: next to the note.')),
+              _Row('Pictures and audio go in', value: _s.attachmentsFolder.isEmpty ? 'The note\'s folder' : _s.attachmentsFolder,
+                  onTap: () => _ask('notes.attachments', 'Pictures and audio go in', _s.attachmentsFolder,
+                      'A folder for pictures and audio added to notes; empty: next to the note.')),
             ]),
             _Group('Appearance', [
               _Line(label: 'Theme', child: _ThemeSwitch(appearance: _s.appearance)),
