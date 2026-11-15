@@ -59,6 +59,44 @@ Edit insertAround(Edit e, String open, [String close = '']) {
   );
 }
 
+/// A web link: [label] linking to [url] in place of the selection, the cursor after it. Without a label the
+/// address shows as it is (<https://…>), as Obsidian writes a bare link.
+Edit insertWebLink(Edit e, String label, String url) {
+  final address = url.trim().replaceAll(' ', '%20');
+  final link = label.trim().isEmpty ? '<$address>' : '[${label.trim().replaceAll(']', r'\]')}]($address)';
+  final at = e.start + link.length;
+  return (text: e.text.replaceRange(e.start, e.end, link), start: at, end: at);
+}
+
+final _listItem = RegExp(r'^(\s*)([-*+]|(\d+)([.)]))(\s+)(\[[ xX]\]\s+)?(.*)$');
+
+/// Enter in a list, as Obsidian has it: [after] is [before] with one line break typed at [cursor] (just after
+/// it). The line it ended was a list item ("- ", "1. ", "- [ ] "): the new line starts with the next item's mark
+/// (a number counted on, a box unticked). The item was empty: its mark goes instead, and the list ends there with
+/// a plain line. Null when the break was not in a list item.
+Edit? continueList(String before, String after, int cursor) {
+  if (after.length != before.length + 1 || cursor < 1 || cursor > after.length || after[cursor - 1] != '\n') {
+    return null;
+  }
+  if (after.substring(0, cursor - 1) + after.substring(cursor) != before) return null;
+  final lineStart = cursor < 2 ? 0 : after.lastIndexOf('\n', cursor - 2) + 1;
+  final line = after.substring(lineStart, cursor - 1);
+  final m = _listItem.firstMatch(line);
+  if (m == null) return null;
+  final rest = after.substring(cursor);
+  final restOfLine = rest.contains('\n') ? rest.substring(0, rest.indexOf('\n')) : rest;
+  if (m[7]!.trim().isEmpty && restOfLine.trim().isEmpty) {
+    // An empty item: out of the list, on a plain line where the item was.
+    final text = after.substring(0, lineStart) + after.substring(cursor);
+    return (text: text, start: lineStart, end: lineStart);
+  }
+  final number = m[3];
+  final mark = number != null ? '${int.parse(number) + 1}${m[4]}' : m[2]!;
+  final next = '${m[1]}$mark${m[5]}${m[6] != null ? '[ ] ' : ''}';
+  final text = after.substring(0, cursor) + next + after.substring(cursor);
+  return (text: text, start: cursor + next.length, end: cursor + next.length);
+}
+
 final _task = RegExp(r'^(\s*[-*+] )\[([ xX])\]', multiLine: true);
 final _fence = RegExp(r'```[\s\S]*?```');
 

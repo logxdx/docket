@@ -140,7 +140,7 @@ class _NoteScreenState extends State<NoteScreen> {
     _enricher = ServicesScope.of(context).enricher;
     if (_saved.isEmpty && _text.text.isEmpty) {
       final note = _book.byPath(_path);
-      _text.text = _saved = note?.text ?? '';
+      _text.text = _saved = _previous = note?.text ?? '';
       _hadText = !Notebook.isBlank(_saved);
       _editing = !_book.readOnly && (widget.startEditing || _saved.trim().isEmpty);
     }
@@ -286,10 +286,19 @@ class _NoteScreenState extends State<NoteScreen> {
     super.dispose();
   }
 
+  /// The text as it was before the last change: Enter in a list is seen against it.
+  String _previous = '';
+
   void _changed(String text) {
     _save?.cancel();
     _save = Timer(const Duration(milliseconds: 700), _flush);
     _edited = true;
+    // Enter in a list item: the next item's mark, or (an empty item) out of the list.
+    if (continueList(_previous, text, _text.selection.baseOffset) case final e?) {
+      _text.value = TextEditingValue(text: e.text, selection: TextSelection.collapsed(offset: e.start));
+      text = e.text;
+    }
+    _previous = text;
     final before = text.substring(0, _text.selection.baseOffset.clamp(0, text.length));
     final open = RegExp(r'\[\[([^\[\]\n|#]*)$').firstMatch(before);
     setState(() {
@@ -399,6 +408,47 @@ class _NoteScreenState extends State<NoteScreen> {
       return;
     }
     await _insert('![[$name]]\n');
+  }
+
+  /// A web link at the cursor: the selection (if any) as its text, the address asked for (the clipboard's, when it
+  /// holds one, filled in).
+  Future<void> _webLink() async {
+    final value = _text.value;
+    final selection = value.selection.isValid ? value.selection : TextSelection.collapsed(offset: value.text.length);
+    final selected = value.text.substring(selection.start, selection.end);
+    final copied = (await Clipboard.getData(Clipboard.kTextPlain))?.text?.trim() ?? '';
+    if (!mounted) return;
+    final label = TextEditingController(text: selected);
+    final url = TextEditingController(text: RegExp(r'^(https?://|mailto:)\S+$').hasMatch(copied) ? copied : 'https://');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Web link'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: label, decoration: const InputDecoration(labelText: 'Text (optional)')),
+          const SizedBox(height: 12),
+          TextField(
+            controller: url,
+            autofocus: true,
+            keyboardType: TextInputType.url,
+            decoration: const InputDecoration(labelText: 'Address'),
+            onSubmitted: (_) => Navigator.pop(context, true),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Insert')),
+        ],
+      ),
+    );
+    final text = label.text, address = url.text.trim();
+    label.dispose();
+    url.dispose();
+    if (ok != true || !mounted || address.isEmpty || address == 'https://') return;
+    final next = insertWebLink((text: value.text, start: selection.start, end: selection.end), text, address);
+    _text.value = TextEditingValue(text: next.text, selection: TextSelection.collapsed(offset: next.start));
+    _focus.requestFocus();
+    _changed(_text.text);
   }
 
   /// A toolbar edit on the text and its selection.
@@ -778,6 +828,7 @@ class _NoteScreenState extends State<NoteScreen> {
               _Toolbar(
                 onFormat: _format,
                 undo: _undo,
+                onWebLink: _webLink,
                 onPicture: () => _attach(audio: false),
                 onAudio: () => _attach(audio: true),
               ),
@@ -975,7 +1026,13 @@ class _TranscriptCardState extends State<_TranscriptCard> {
 
 /// Formatting buttons above the keyboard.
 class _Toolbar extends StatelessWidget {
-  const _Toolbar({required this.onFormat, required this.undo, required this.onPicture, required this.onAudio});
+  const _Toolbar({
+    required this.onFormat,
+    required this.undo,
+    required this.onPicture,
+    required this.onAudio,
+    required this.onWebLink,
+  });
 
   final void Function(Edit Function(Edit)) onFormat;
   final UndoHistoryController undo;
@@ -983,6 +1040,9 @@ class _Toolbar extends StatelessWidget {
   /// Add a picture, or a sound, from the phone at the cursor.
   final VoidCallback onPicture;
   final VoidCallback onAudio;
+
+  /// Insert a web link ([text](https://…)), asking for its address.
+  final VoidCallback onWebLink;
 
   @override
   Widget build(BuildContext context) {
@@ -1012,6 +1072,7 @@ class _Toolbar extends StatelessWidget {
           button('List', Icons.format_list_bulleted_rounded, (e) => prefixLines(e, '- ')),
           button('Checkbox', Icons.check_box_outlined, (e) => prefixLines(e, '- [ ] ')),
           button('Link a note', Icons.link_rounded, (e) => insertAround(e, '[[', ']]'), tinted: true),
+          IconButton(tooltip: 'Web link', icon: const Icon(Icons.public_rounded, size: 20), onPressed: onWebLink),
           button('Tag', Icons.tag_rounded, (e) => insertAround(e, '#')),
               ]),
             ),
