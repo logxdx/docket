@@ -19,6 +19,7 @@ import 'navigation.dart';
 import 'note_tools.dart';
 import 'note_screen.dart';
 import 'record_screen.dart';
+import 'search_screen.dart';
 import 'archive_screen.dart';
 import 'trash_screen.dart';
 
@@ -519,17 +520,13 @@ class _NotesScreenState extends State<NotesScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                 child: TextField(
                   controller: _query,
-                  onChanged: (_) => setState(_selected.clear),
+                  // Search has a page of its own: kinds, dates, folders, tags.
+                  readOnly: true,
+                  onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const SearchScreen())),
                   decoration: InputDecoration(
                     hintText: 'Search ${_book.notes.length} notes${readOnly ? ' · read only' : ''}',
                     prefixIcon: const Icon(Icons.search_rounded),
-                    suffixIcon: _query.text.isEmpty
-                        ? null
-                        : IconButton(
-                            tooltip: 'Clear',
-                            icon: const Icon(Icons.close_rounded),
-                            onPressed: () => setState(() => _query.clear()),
-                          ),
+                    suffixIcon: const Icon(Icons.tune_rounded),
                     filled: true,
                     fillColor: theme.colorScheme.surfaceContainerHigh,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),

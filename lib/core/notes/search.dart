@@ -169,6 +169,29 @@ class SearchQuery {
 
   bool matches(Note note) => _matches(_Doc(note));
 
+  /// The words to look for in a note's text (and title), not counting what is excluded.
+  static Iterable<_Text> _words(List<_Term> g) => [
+        ...g.whereType<_Text>().where((t) => t.field == '' || t.field == 'content'),
+        ...g.whereType<_Scoped>().expand((s) => s.inner),
+      ];
+
+  /// Whether the query has words to look for (not only tags, properties, files).
+  bool get hasWords => _groups.any((g) => _words(g).any((t) => !t.negated));
+
+  /// Whether the query asks things of a note as a whole: tags, properties, its name or path.
+  bool get hasNoteTerms =>
+      _groups.any((g) => g.any((t) => t is _Tag || t is _Property || (t is _Text && (t.field == 'file' || t.field == 'path'))));
+
+  /// Whether [chunk] (a line of a transcript, a picture's caption, a task) holds the query's words: every word of
+  /// one OR group, none of those excluded.
+  bool inText(String chunk) {
+    final low = chunk.toLowerCase();
+    return _groups.any((g) {
+      final words = _words(g).toList();
+      return words.any((t) => !t.negated) && words.every((t) => _hit(t, low) != t.negated);
+    });
+  }
+
   bool _matches(_Doc d) => _groups.any((g) => g.every((t) => _holds(t, d) != t.negated));
 
   static bool _hit(_Text t, String hay) => t.regex != null ? t.regex!.hasMatch(hay) : hay.contains(t.value);

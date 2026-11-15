@@ -123,6 +123,9 @@ class Notebook extends ChangeNotifier {
   /// [[links]] still lead to them.
   static const archiveDir = 'Archive';
 
+  /// Every note, archived ones too, newest first.
+  List<Note> get allNotes => _notes.values.toList()..sort((a, b) => b.file.mtime.compareTo(a.file.mtime));
+
   static bool isArchived(String path) => path == archiveDir || path.startsWith('$archiveDir/');
 
   /// The user's own notes, only read: no editing, new notes or saving.

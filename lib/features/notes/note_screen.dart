@@ -41,13 +41,16 @@ import 'spoken_view.dart';
 const taskScheme = 'notes-task:';
 
 class NoteScreen extends StatefulWidget {
-  const NoteScreen({super.key, required this.path, this.startEditing = false, this.anchor});
+  const NoteScreen({super.key, required this.path, this.startEditing = false, this.anchor, this.playAt});
 
   final String path;
   final bool startEditing;
 
   /// A heading to scroll to once open (a [[Note#Heading]] link).
   final String? anchor;
+
+  /// A recording to play once open, from a moment (a search result).
+  final ({String audio, double seconds})? playAt;
 
   @override
   State<NoteScreen> createState() => _NoteScreenState();
@@ -83,6 +86,13 @@ class _NoteScreenState extends State<NoteScreen> {
     super.initState();
     if (widget.anchor case final anchor?) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToHeading(anchor, 0));
+    }
+    if (widget.playAt case final at?) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final note = _book.byPath(_path);
+        unawaited(_playback(at.audio, note?.folder).play(at: Duration(milliseconds: (at.seconds * 1000).round())));
+      });
     }
   }
 
