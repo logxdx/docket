@@ -62,10 +62,14 @@ Edit insertAround(Edit e, String open, [String close = '']) {
 /// A web link: [label] linking to [url] in place of the selection, the cursor after it. Without a label the
 /// address shows as it is (<https://…>), as Obsidian writes a bare link.
 Edit insertWebLink(Edit e, String label, String url) {
-  final address = url.trim().replaceAll(' ', '%20');
+  var address = url.trim().replaceAll(' ', '%20');
+  // "example.com" is a web address: https:// in front, as a browser would.
+  if (!RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]*:').hasMatch(address)) address = 'https://$address';
   final link = label.trim().isEmpty ? '<$address>' : '[${label.trim().replaceAll(']', r'\]')}]($address)';
-  final at = e.start + link.length;
-  return (text: e.text.replaceRange(e.start, e.end, link), start: at, end: at);
+  // Not run into the word before it.
+  final spaced = e.start > 0 && !RegExp(r'[\s(\[]').hasMatch(e.text[e.start - 1]) ? ' $link' : link;
+  final at = e.start + spaced.length;
+  return (text: e.text.replaceRange(e.start, e.end, spaced), start: at, end: at);
 }
 
 final _listItem = RegExp(r'^(\s*)([-*+]|(\d+)([.)]))(\s+)(\[[ xX]\]\s+)?(.*)$');
@@ -75,10 +79,12 @@ final _listItem = RegExp(r'^(\s*)([-*+]|(\d+)([.)]))(\s+)(\[[ xX]\]\s+)?(.*)$');
 /// (a number counted on, a box unticked). The item was empty: its mark goes instead, and the list ends there with
 /// a plain line. Null when the break was not in a list item.
 Edit? continueList(String before, String after, int cursor) {
-  if (after.length != before.length + 1 || cursor < 1 || cursor > after.length || after[cursor - 1] != '\n') {
-    return null;
-  }
-  if (after.substring(0, cursor - 1) + after.substring(cursor) != before) return null;
+  if (cursor < 1 || cursor > after.length || after[cursor - 1] != '\n') return null;
+  // A line break just typed: one more than before, what follows the cursor as it was. The keyboard may send the
+  // word it was still writing (autocorrected: "one" to "One") with the break, so the line itself may differ.
+  final tail = after.length - cursor;
+  if (tail > before.length || before.substring(before.length - tail) != after.substring(cursor)) return null;
+  if ('\n'.allMatches(after).length != '\n'.allMatches(before).length + 1) return null;
   final lineStart = cursor < 2 ? 0 : after.lastIndexOf('\n', cursor - 2) + 1;
   final line = after.substring(lineStart, cursor - 1);
   final m = _listItem.firstMatch(line);

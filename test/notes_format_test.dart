@@ -47,6 +47,13 @@ void main() {
       expect(enter('# Title\n- a\nnext', 11), '# Title\n- a\n- |\nnext');
     });
 
+    test('the keyboard sending its autocorrected word with the break: still the list', () {
+      final e = continueList('1. one', '1. One\n', 7)!;
+      expect(e.text, '1. One\n2. ');
+      expect(e.start, e.text.length);
+      expect(continueList('- a\nb', '- a\nb\n', 6), isNull, reason: 'the line ended is not an item');
+    });
+
     test('Enter in the middle of an item splits it into two items', () {
       expect(enter('- milkeggs', 6), '- milk\n- |eggs');
     });
@@ -70,6 +77,9 @@ void main() {
     final bare = insertWebLink((text: 'go ', start: 3, end: 3), '', 'https://x.dev');
     expect(bare.text, 'go <https://x.dev>');
     expect(bare.start, bare.text.length);
+    // After a word: a space first. No scheme: https://.
+    expect(insertWebLink((text: 'two', start: 3, end: 3), '', 'example.com').text, 'two <https://example.com>');
+    expect(insertWebLink((text: '', start: 0, end: 0), 'mail', 'mailto:a@b.c').text, '[mail](mailto:a@b.c)');
   });
 
   test('tasks tick by number, code blocks left alone', () {
