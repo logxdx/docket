@@ -24,7 +24,7 @@ printf '== models\n'
 python3 -I tool/fetch_models.py
 python3 -I tool/stage_models.py
 
-printf '\n== Align and Title\n'
+printf '\n== Desert Ant models\n'
 tool/build_desert_ant.sh
 
 printf '\n== APK %s (%s)\n' "$name" "$number"

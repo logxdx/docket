@@ -1,0 +1,249 @@
+From 3b8405f9ededfae647a6a56af681f909d5d89f1b Mon Sep 17 00:00:00 2001
+From: docket <docket@localhost>
+Date: Sun, 15 Nov 2026 15:52:12 +0530
+Subject: [PATCH] Android: one native library for Docket's six models
+ (DesertAntAndroid)
+
+Clear, Ear, Who, Gist, Align and Title in one dynamic product, so the static Swift runtime and the shared targets are linked once (55 MB) rather than once per model (~56 MB each). With DAL_ANDROID_SHARED=DesertAntAndroid the model AARs carry Kotlin only and 'build:android-natives shared' builds the one library into .build-android/shared/jniLibs; every *Native.kt loads it.
+---
+ Package.swift                                 | 11 ++++-
+ .../ai/desertant/gradle/ModelSdkPlugin.kt     |  6 +++
+ mise-tasks/build/android                      |  8 +++
+ mise-tasks/build/android-natives              | 49 +++++++++++++------
+ .../kotlin/ai/desertant/align/AlignNative.kt  |  2 +-
+ .../kotlin/ai/desertant/clear/ClearNative.kt  |  2 +-
+ .../main/kotlin/ai/desertant/ear/EarNative.kt |  2 +-
+ .../kotlin/ai/desertant/gist/GistNative.kt    |  2 +-
+ .../kotlin/ai/desertant/title/TitleNative.kt  |  2 +-
+ .../main/kotlin/ai/desertant/who/WhoNative.kt |  2 +-
+ 10 files changed, 65 insertions(+), 21 deletions(-)
+
+diff --git a/Package.swift b/Package.swift
+index c58e60e..8d18852 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -342,7 +342,16 @@ let modelWasmProducts: [Product] = noJavaScriptKit ? [] : models.filter { !$0.ap
+     .executable(name: "\(model.name)Web", targets: ["\(model.name)Web"])
+ }
+ 
+-let modelProducts: [Product] = models.flatMap { model -> [Product] in
++// Docket's Android library: the six models it ships in one dynamic library, so the Swift runtime,
++// Foundation and the shared targets are linked once instead of once per model (each per-model
++// library carries its own static copy, ~56 MB apiece). The model AARs then carry Kotlin only and
++// every *Native.kt loads this one (NativeLibraries loads a library once, whichever model asks).
++let sharedAndroidModels = ["Clear", "Ear", "Who", "Gist", "Align", "Title"]
++let sharedAndroidProducts: [Product] = noJavaScriptKit
++    ? [.library(name: "DesertAntAndroid", type: .dynamic, targets: sharedAndroidModels)]
++    : []
++
++let modelProducts: [Product] = sharedAndroidProducts + models.flatMap { model -> [Product] in
+     model.appleOnly || !noJavaScriptKit
+         ? [.library(name: model.name, targets: [model.name])]
+         : [.library(name: model.name, targets: [model.name])]
+diff --git a/gradle-plugin/src/main/kotlin/ai/desertant/gradle/ModelSdkPlugin.kt b/gradle-plugin/src/main/kotlin/ai/desertant/gradle/ModelSdkPlugin.kt
+index ddb55c0..de1f6ca 100644
+--- a/gradle-plugin/src/main/kotlin/ai/desertant/gradle/ModelSdkPlugin.kt
++++ b/gradle-plugin/src/main/kotlin/ai/desertant/gradle/ModelSdkPlugin.kt
+@@ -78,6 +78,12 @@ class ModelSdkPlugin : Plugin<Project> {
+                 "abis",
+                 project.providers.environmentVariable("DAL_ANDROID_ABIS").orElse(""),
+             )
++            // Whether the natives go into one shared library (Docket's DesertAntAndroid)
++            // instead of this AAR: switching it must rebuild, not find jniLibs up to date.
++            task.inputs.property(
++                "shared",
++                project.providers.environmentVariable("DAL_ANDROID_SHARED").orElse(""),
++            )
+             task.inputs.dir(repoRoot.resolve("Sources"))
+             task.inputs.dir(repoRoot.resolve("mise-tasks"))
+             task.outputs.dir(project.projectDir.resolve("src/main/jniLibs"))
+diff --git a/mise-tasks/build/android b/mise-tasks/build/android
+index 3695320..a6e26a7 100755
+--- a/mise-tasks/build/android
++++ b/mise-tasks/build/android
+@@ -88,6 +88,14 @@ for model in $models; do
+     }
+     # The core AAR always carries both LiteRT ABIs (prebuilt, cheap); only the
+     # Swift cross-compile honors the ABI choice, so check what was built.
++    if [ -n "${DAL_ANDROID_SHARED:-}" ]; then
++        unzip -Z1 "$aar" | grep -q '\.so$' && {
++            echo "error: the $model AAR carries a native library; with DAL_ANDROID_SHARED it must not" >&2
++            exit 1
++        }
++        echo "ok: $aar (natives in lib$DAL_ANDROID_SHARED.so)"
++        continue
++    fi
+     for abi in $DAL_ANDROID_ABIS; do
+         unzip -Z1 "$aar" | grep -qx "jni/$abi/lib${product}Android.so" \
+             || { echo "error: the $model AAR is missing jni/$abi/lib${product}Android.so" >&2; exit 1; }
+diff --git a/mise-tasks/build/android-natives b/mise-tasks/build/android-natives
+index 39874fd..34c868e 100755
+--- a/mise-tasks/build/android-natives
++++ b/mise-tasks/build/android-natives
+@@ -177,22 +177,43 @@ if [ -z "$strip_bin" ]; then
+     [ -n "$candidate" ] && { strip_bin=$candidate; strip_mode=strip; }
+ fi
+ 
+-for model in $(dal_select "${usage_model:-all}" kotlin); do
+-    # A pure-Kotlin module (no AndroidManifest.xml) is a plain JVM jar: no JNI
+-    # library to cross-compile.
+-    if [ ! -f "packages/$model-kotlin/src/main/AndroidManifest.xml" ]; then
+-        echo "== $model is pure Kotlin, no natives =="
+-        continue
++# DAL_ANDROID_SHARED names one dynamic product holding several models (Docket's
++# DesertAntAndroid). With it set, a model's own preBuild leaves its jniLibs empty
++# (its AAR carries Kotlin only) and `build:android-natives shared` builds that
++# product, once, into .build-android/shared/jniLibs for the app to package.
++shared="${DAL_ANDROID_SHARED:-}"
++if [ "${usage_model:-all}" = shared ]; then
++    [ -n "$shared" ] || { echo "error: 'shared' needs DAL_ANDROID_SHARED (a product name)" >&2; exit 1; }
++    targets=shared
++else
++    targets=$(dal_select "${usage_model:-all}" kotlin)
++fi
++
++for model in $targets; do
++    if [ "$model" = shared ]; then
++        library=$shared
++        jni_libs=".build-android/shared/jniLibs"
++    else
++        # A pure-Kotlin module (no AndroidManifest.xml) is a plain JVM jar: no JNI
++        # library to cross-compile.
++        if [ ! -f "packages/$model-kotlin/src/main/AndroidManifest.xml" ]; then
++            echo "== $model is pure Kotlin, no natives =="
++            continue
++        fi
++        library="$(dal_product "$model")Android"
++        jni_libs="packages/$model-kotlin/src/main/jniLibs"
+     fi
+-    product=$(dal_product "$model")
+-    jni_libs="packages/$model-kotlin/src/main/jniLibs"
+     # Start empty, or a library left by an earlier build for another ABI would
+     # be packaged beside this one, built from older sources.
+     rm -rf "$jni_libs"
++    if [ -n "$shared" ] && [ "$model" != shared ]; then
++        echo "== $model: natives in lib$shared.so (built by 'build:android-natives shared') =="
++        continue
++    fi
+ 
+     for pair in $abi_pairs; do
+         abi=${pair%:*} arch=${pair#*:}
+-        echo "== $product $abi ($arch) =="
++        echo "== $library $abi ($arch) =="
+ 
+         # No -resource-dir override: the SDK descriptor declares sdkRootPath and
+         # swiftStaticResourcesPath per triple and SwiftPM applies the static one.
+@@ -231,7 +252,7 @@ for model in $(dal_select "${usage_model:-all}" kotlin); do
+         # --no-undefined turns a missing runtime symbol into a link error here
+         # instead of an UnsatisfiedLinkError on a user's phone.
+         swift_snapshot swift build --scratch-path .build-android -c release \
+-            --product "${product}Android" \
++            --product "$library" \
+             --swift-sdks-path "$sdkroot" --swift-sdk "$arch-unknown-linux-android$api" \
+             --static-swift-stdlib \
+             -Xlinker "-LVendor/litert/lib/android-$arch" -Xlinker "-L$cxx_dir" \
+@@ -244,12 +265,12 @@ for model in $(dal_select "${usage_model:-all}" kotlin); do
+         # .build/out/Products/Release-android-<arch>/, older SwiftPM used
+         # .build/<triple>/release/. Both spell the arch. The trailing slash follows a
+         # scratch dir that is a symlink (kept off a small project disk).
+-        built=$(find .build-android/ -type f -name "lib${product}Android.so" -path "*$arch*" 2> /dev/null | head -1)
++        built=$(find .build-android/ -path .build-android/shared -prune -o -type f -name "lib$library.so" -path "*$arch*" -print 2> /dev/null | head -1)
+         [ -n "$built" ] \
+-            || { echo "error: lib${product}Android.so for $arch not found under .build-android" >&2; exit 1; }
++            || { echo "error: lib$library.so for $arch not found under .build-android" >&2; exit 1; }
+         cp "$built" "$dest/"
+ 
+-        so="$dest/lib${product}Android.so"
++        so="$dest/lib$library.so"
+         case "$strip_mode" in
+             objcopy) "$strip_bin" --strip-unneeded "$so" "$so.stripped" && mv "$so.stripped" "$so" ;;
+             strip) "$strip_bin" --strip-unneeded "$so" ;;
+@@ -259,6 +280,6 @@ for model in $(dal_select "${usage_model:-all}" kotlin); do
+ 
+     # The AAR ships no model: it downloads the pinned revision on first use.
+     # Remove anything an older build staged into the AAR's classpath resources.
+-    rm -rf "packages/$model-kotlin/src/main/resources"
++    [ "$model" = shared ] || rm -rf "packages/$model-kotlin/src/main/resources"
+     du -sh "$jni_libs"
+ done
+diff --git a/packages/align-kotlin/src/main/kotlin/ai/desertant/align/AlignNative.kt b/packages/align-kotlin/src/main/kotlin/ai/desertant/align/AlignNative.kt
+index 65c9dbc..30d6210 100644
+--- a/packages/align-kotlin/src/main/kotlin/ai/desertant/align/AlignNative.kt
++++ b/packages/align-kotlin/src/main/kotlin/ai/desertant/align/AlignNative.kt
+@@ -4,7 +4,7 @@ import ai.desertant.core.NativeLibraries
+ import ai.desertant.core.NativeModelApi
+ 
+ internal object AlignNative : NativeModelApi {
+-    override fun ensureLoaded() = NativeLibraries.loadModel("AlignAndroid")
++    override fun ensureLoaded() = NativeLibraries.loadModel("DesertAntAndroid")
+     override external fun create(modelId: ByteArray, cacheRoot: ByteArray?, directory: ByteArray?): Long
+     override external fun destroy(handle: Long)
+     override external fun isDownloaded(handle: Long): Int
+diff --git a/packages/clear-kotlin/src/main/kotlin/ai/desertant/clear/ClearNative.kt b/packages/clear-kotlin/src/main/kotlin/ai/desertant/clear/ClearNative.kt
+index 3db0ac2..f6790fe 100644
+--- a/packages/clear-kotlin/src/main/kotlin/ai/desertant/clear/ClearNative.kt
++++ b/packages/clear-kotlin/src/main/kotlin/ai/desertant/clear/ClearNative.kt
+@@ -4,7 +4,7 @@ import ai.desertant.core.NativeLibraries
+ import ai.desertant.core.NativeModelApi
+ 
+ internal object ClearNative : NativeModelApi {
+-    override fun ensureLoaded() = NativeLibraries.loadModel("ClearAndroid")
++    override fun ensureLoaded() = NativeLibraries.loadModel("DesertAntAndroid")
+     override external fun create(modelId: ByteArray, cacheRoot: ByteArray?, directory: ByteArray?): Long
+     override external fun destroy(handle: Long)
+     override external fun isDownloaded(handle: Long): Int
+diff --git a/packages/ear-kotlin/src/main/kotlin/ai/desertant/ear/EarNative.kt b/packages/ear-kotlin/src/main/kotlin/ai/desertant/ear/EarNative.kt
+index f982086..0623b8c 100644
+--- a/packages/ear-kotlin/src/main/kotlin/ai/desertant/ear/EarNative.kt
++++ b/packages/ear-kotlin/src/main/kotlin/ai/desertant/ear/EarNative.kt
+@@ -4,7 +4,7 @@ import ai.desertant.core.NativeLibraries
+ import ai.desertant.core.NativeModelApi
+ 
+ internal object EarNative : NativeModelApi {
+-    override fun ensureLoaded() = NativeLibraries.loadModel("EarAndroid")
++    override fun ensureLoaded() = NativeLibraries.loadModel("DesertAntAndroid")
+     override external fun create(modelId: ByteArray, cacheRoot: ByteArray?, directory: ByteArray?): Long
+     override external fun destroy(handle: Long)
+     override external fun isDownloaded(handle: Long): Int
+diff --git a/packages/gist-kotlin/src/main/kotlin/ai/desertant/gist/GistNative.kt b/packages/gist-kotlin/src/main/kotlin/ai/desertant/gist/GistNative.kt
+index 095a079..fbf8092 100644
+--- a/packages/gist-kotlin/src/main/kotlin/ai/desertant/gist/GistNative.kt
++++ b/packages/gist-kotlin/src/main/kotlin/ai/desertant/gist/GistNative.kt
+@@ -4,7 +4,7 @@ import ai.desertant.core.NativeLibraries
+ import ai.desertant.core.NativeModelApi
+ 
+ internal object GistNative : NativeModelApi {
+-    override fun ensureLoaded() = NativeLibraries.loadModel("GistAndroid")
++    override fun ensureLoaded() = NativeLibraries.loadModel("DesertAntAndroid")
+     override external fun create(modelId: ByteArray, cacheRoot: ByteArray?, directory: ByteArray?): Long
+     override external fun destroy(handle: Long)
+     override external fun isDownloaded(handle: Long): Int
+diff --git a/packages/title-kotlin/src/main/kotlin/ai/desertant/title/TitleNative.kt b/packages/title-kotlin/src/main/kotlin/ai/desertant/title/TitleNative.kt
+index d39fdc2..a01ad50 100644
+--- a/packages/title-kotlin/src/main/kotlin/ai/desertant/title/TitleNative.kt
++++ b/packages/title-kotlin/src/main/kotlin/ai/desertant/title/TitleNative.kt
+@@ -4,7 +4,7 @@ import ai.desertant.core.NativeLibraries
+ import ai.desertant.core.NativeModelApi
+ 
+ internal object TitleNative : NativeModelApi {
+-    override fun ensureLoaded() = NativeLibraries.loadModel("TitleAndroid")
++    override fun ensureLoaded() = NativeLibraries.loadModel("DesertAntAndroid")
+     override external fun create(modelId: ByteArray, cacheRoot: ByteArray?, directory: ByteArray?): Long
+     override external fun destroy(handle: Long)
+     override external fun isDownloaded(handle: Long): Int
+diff --git a/packages/who-kotlin/src/main/kotlin/ai/desertant/who/WhoNative.kt b/packages/who-kotlin/src/main/kotlin/ai/desertant/who/WhoNative.kt
+index 18e832a..1eb3521 100644
+--- a/packages/who-kotlin/src/main/kotlin/ai/desertant/who/WhoNative.kt
++++ b/packages/who-kotlin/src/main/kotlin/ai/desertant/who/WhoNative.kt
+@@ -4,7 +4,7 @@ import ai.desertant.core.NativeLibraries
+ import ai.desertant.core.NativeModelApi
+ 
+ internal object WhoNative : NativeModelApi {
+-    override fun ensureLoaded() = NativeLibraries.loadModel("WhoAndroid")
++    override fun ensureLoaded() = NativeLibraries.loadModel("DesertAntAndroid")
+     override external fun create(modelId: ByteArray, cacheRoot: ByteArray?, directory: ByteArray?): Long
+     override external fun destroy(handle: Long)
+     override external fun isDownloaded(handle: Long): Int
+-- 
+2.56.1
+

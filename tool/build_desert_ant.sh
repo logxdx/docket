@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# Build Docket's Align and Title libraries (android/app/libs/{align,title}-release.aar) from source:
-# Desert Ant's SDK at v4.3.0 with Docket's patches (third_party/desert-ant-core-patches/0001, 0002), for
-# arm64-v8a only. Nothing built is kept in git; the same here and in CI (tool/ci.sh, tool/release.sh).
+# Build Docket's Desert Ant libraries from source: Desert Ant's SDK at v4.3.0 with Docket's patches
+# (third_party/desert-ant-core-patches/), for arm64-v8a only, into android/app/libs/:
+#   <model>-release.aar                      the Kotlin API of Clear, Ear, Who, Gist, Align and Title (no natives)
+#   jni/arm64-v8a/libDesertAntAndroid.so     all six models' native code in one library
+# One library rather than six: each per-model library links its own static copy of the Swift runtime and
+# Foundation (~56 MB apiece). ai.desertant:core (LiteRT) still comes from Maven.
+# Nothing built is kept in git; the same here and in CI (tool/ci.sh, tool/release.sh).
 #
 #   tool/build_desert_ant.sh           # build when the pin or the patches changed since the last build
 #   tool/build_desert_ant.sh --force   # build again regardless
@@ -22,15 +26,21 @@ fi
 repo=https://github.com/Desert-Ant-Labs/desert-ant-core
 pin=baf4e6e3b4655c8e54aa8d5a25215b5f35f899a7 # v4.3.0
 abi=arm64-v8a
-patches=("$root"/third_party/desert-ant-core-patches/000[12]-*.patch)
-[ "${#patches[@]}" -eq 2 ] && [ -f "${patches[0]}" ] || { echo "the Align and Title patches are missing" >&2; exit 1; }
+models=(clear ear who gist align title)
+shared=DesertAntAndroid
+patches=("$root"/third_party/desert-ant-core-patches/000[1-3]-*.patch)
+[ "${#patches[@]}" -eq 3 ] && [ -f "${patches[0]}" ] || { echo "Docket's Desert Ant patches are missing" >&2; exit 1; }
 libs=android/app/libs
+so="$libs/jni/$abi/lib$shared.so"
 src=.build/desert-ant-core
-key=$({ echo "$pin $abi"; cat "${patches[@]}"; } | sha256sum | cut -d' ' -f1)
+key=$({ echo "$pin $abi ${models[*]}"; cat "${patches[@]}"; } | sha256sum | cut -d' ' -f1)
 
-if [ "${1:-}" != --force ] && [ -f "$libs/align-release.aar" ] && [ -f "$libs/title-release.aar" ] \
-  && [ "$(cat "$libs/desert-ant.key" 2>/dev/null)" = "$key" ]; then
-  echo "Align and Title: up to date"
+built() {
+  [ -f "$so" ] && [ "$(cat "$libs/desert-ant.key" 2>/dev/null)" = "$key" ] || return 1
+  for model in "${models[@]}"; do [ -f "$libs/$model-release.aar" ] || return 1; done
+}
+if [ "${1:-}" != --force ] && built; then
+  echo "Desert Ant libraries: up to date"
   exit 0
 fi
 
@@ -48,19 +58,19 @@ git -C "$src" -c user.name=docket -c user.email=docket@localhost am --quiet "${p
 (
   cd "$src"
   export MISE_TRUSTED_CONFIG_PATHS="$PWD${MISE_TRUSTED_CONFIG_PATHS:+:$MISE_TRUSTED_CONFIG_PATHS}" MISE_YES=1
-  mise run build:android align --abi "$abi"
-  mise run build:android title --abi "$abi"
+  # The model AARs with Kotlin only, then the one library holding every model's natives.
+  export DAL_ANDROID_SHARED=$shared
+  for model in "${models[@]}"; do mise run build:android "$model" --abi "$abi"; done
+  mise run build:android-natives shared --abi "$abi"
 )
 
-mkdir -p "$libs"
-for model in align title; do
+rm -rf "$libs" && mkdir -p "$libs/jni/$abi"
+for model in "${models[@]}"; do
   aar="$src/packages/$model-kotlin/build/outputs/aar/$model-release.aar"
-  listing=$(unzip -Z1 "$aar")
-  # Exactly one native library, for arm64-v8a: an x86_64 copy would double the APK's share for nothing.
-  natives=$(grep -E '^jni/[^/]+/[^/]+\.so$' <<<"$listing" || true)
-  [ "$(wc -l <<<"$natives")" -eq 1 ] && grep -q "^jni/$abi/" <<<"$natives" \
-    || { printf '%s holds %s, not one %s library\n' "$aar" "${natives:-nothing}" "$abi" >&2; exit 1; }
+  # No natives in a model AAR: they are all in the shared library.
+  if unzip -Z1 "$aar" | grep -q '\.so$'; then echo "$aar carries a native library" >&2; exit 1; fi
   cp "$aar" "$libs/$model-release.aar"
-  printf '%s: %s MB\n' "$libs/$model-release.aar" "$(($(stat -c %s "$aar") / 1000000))"
 done
+cp "$src/.build-android/shared/jniLibs/$abi/lib$shared.so" "$so"
+printf '%s: %s MB, and the six model AARs\n' "$so" "$(($(stat -c %s "$so") / 1000000))"
 echo "$key" >"$libs/desert-ant.key"

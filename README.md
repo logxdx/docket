@@ -96,14 +96,19 @@ happens to exist (their licence counts monthly devices); nothing of the
 notes or the audio is ever sent. `INTERNET` stays for that and the optional
 model server.
 
-**Align and Title for Android** were Apple-only in Desert Ant's SDK. Docket
-ports them as patches on Desert Ant's v4.3.0 source
-(`third_party/desert-ant-core-patches/0001`, `0002`), going through the same
-native licence path as the other models. `tool/build_desert_ant.sh` clones
-that source into `.build/`, applies the patches and runs Desert Ant's own
-Android cross-compile (mise; it fetches Swift 6.4.1 and NDK r30 the first
-time) into `android/app/libs/*.aar`, which git does not keep. `tool/ci.sh`
-and `tool/release.sh` run it; it rebuilds only when the patches change.
+**Desert Ant's models are built from source.** Align and Title were
+Apple-only in Desert Ant's SDK; Docket ports them as patches on Desert Ant's
+v4.3.0 source (`third_party/desert-ant-core-patches/0001`, `0002`), going
+through the same native licence path as the other models. A third patch
+(`0003`) links all six models (Clear, Ear, Who, Gist, Align, Title) into one
+native library, `libDesertAntAndroid.so` (55 MB), instead of one per model
+(each carried its own copy of the Swift runtime: 339 MB for six).
+`tool/build_desert_ant.sh` clones that source into `.build/`, applies the
+patches and runs Desert Ant's own Android cross-compile (mise; it fetches
+Swift 6.4.1 and NDK r30 the first time) into `android/app/libs/` (the six
+Kotlin AARs and the library), which git does not keep. Only
+`ai.desertant:core` (LiteRT) comes from Maven. `tool/ci.sh` and
+`tool/release.sh` run it; it rebuilds only when the patches change.
 
 **Phonon**, also on the phone and offline:
 - *Speech recognition*: Fermion Research's Phonon-2.5 (25 languages) and

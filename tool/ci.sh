@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Docket's checks, the same here and in CI (.github/workflows/ci.yml calls this):
-# static analysis, the Dart tests, Align and Title built from source, the Kotlin (JVM) tests, and a debug APK
+# static analysis, the Dart tests, Desert Ant's models built from source, the Kotlin (JVM) tests, and a debug APK
 # build.
 #
 #   tool/ci.sh
@@ -26,7 +26,7 @@ fi
 step "Dart tests"
 flutter test
 
-step "Align and Title, from Desert Ant's source and the patches"
+step "Desert Ant's models, from its source and the patches"
 tool/build_desert_ant.sh
 
 step "Kotlin tests"
