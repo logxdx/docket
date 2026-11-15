@@ -359,7 +359,9 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
         val raw = call.argument<Boolean>("raw") ?: false
         val out = call.argument<String>("out")?.let(::File)
         val id = call.argument<String>("id")!!
-        val enhancer = if (out != null) clear() else null
+        // Clear only when asked: a recording is kept as recorded until the user cleans it up.
+        val clean = call.argument<Boolean>("clean") ?: false
+        val enhancer = if (out != null && clean) clear() else null
         var enhanced = enhancer != null
         var problem: String? = null
 
@@ -415,7 +417,7 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
             else Audio.DecodedSource(context, source)
         input.use { for ((block, rate) in Audio.blocks(it, chunkSec)) emit(block, rate) }
         writer?.finish()
-        if (out != null && enhancer == null) problem = "Audio cleanup (Clear) is not on this phone; the recording is kept as recorded."
+        if (out != null && clean && enhancer == null) problem = "Audio cleanup (Clear) is not on this phone; the recording is kept as recorded."
         val samples = analysis.toArray()
         if (samples.isEmpty()) throw IllegalStateException("the recording is empty")
         sessions[id] = Session(samples, analysisRate, samples.size.toDouble() / analysisRate)

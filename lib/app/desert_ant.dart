@@ -258,11 +258,12 @@ class DesertAnt {
     String source, {
     bool raw = false,
     String? out,
+    bool clean = false,
     void Function(double)? onProgress,
   }) async {
     if (onProgress != null) _progress[id] = onProgress;
     try {
-      final m = await _call<Map>('session.prepare', {'id': id, 'source': source, 'raw': raw, 'out': out});
+      final m = await _call<Map>('session.prepare', {'id': id, 'source': source, 'raw': raw, 'out': out, 'clean': clean});
       if (m == null) throw const ModelsMissing();
       return (
         id: id,

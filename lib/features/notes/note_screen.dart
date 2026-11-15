@@ -186,11 +186,12 @@ class _NoteScreenState extends State<NoteScreen> {
   }
 
   /// Hear [audio] again in [language], its transcript replaced.
-  Future<void> _transcribeAgain(String audio, String language) async {
+  Future<void> _cleanUp(String audio, CleanUpChoice c) async {
     await _flush();
     final recordings = _recordings!;
     final note = _book.byPath(_path);
-    await recordings.transcribeAgain(_path, audio, language);
+    await recordings.cleanUp(_path, audio,
+        clean: c.clean, transcribe: c.transcribe, speakers: c.speakers, timing: c.timing, language: c.language);
     if (!mounted || note == null) return;
     final path = note.folder.isEmpty ? audio : '${note.folder}/$audio';
     final failed = recordings.againFailed[path];
@@ -801,7 +802,7 @@ class _NoteScreenState extends State<NoteScreen> {
                       part: part,
                       playback: audio == null ? null : _playback(audio, note?.folder),
                       loadWords: () async => audio == null ? null : _wordsFor(audio, note?.folder),
-                      onAgain: readOnly || audio == null ? null : (language) => _transcribeAgain(audio, language),
+                      onCleanUp: readOnly || audio == null ? null : (choice) => _cleanUp(audio, choice),
                     ),
                 },
               if (backlinks.isNotEmpty) ...[

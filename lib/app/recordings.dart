@@ -34,6 +34,7 @@ import 'desert_ant.dart';
 /// The steps, as the note's card names them.
 enum Stage {
   waiting('Waiting'),
+  saving('Saving the audio'),
   cleaning('Cleaning the audio'),
   language('Detecting the language'),
   transcribing('Transcribing'),
@@ -234,11 +235,11 @@ class Recordings extends ChangeNotifier {
     final audioPath = dir.isEmpty ? audioName : '$dir/$audioName';
     final tmp = Directory.systemTemp.createTempSync('rec');
     try {
-      // 1. Clean the audio, kept beside the note.
-      _at(id, Stage.cleaning, 0);
-      final cleaned = '${tmp.path}/$audioName';
-      final prepared = await ant.prepareSession(id, job.raw, raw: true, out: cleaned, onProgress: (f) => _at(id, Stage.cleaning, f));
-      await notebook.vault.attach(audioPath, File(cleaned), 'audio/mp4');
+      // 1. The audio, kept beside the note as recorded (Clean up cleans it, on request).
+      _at(id, Stage.saving, 0);
+      final kept = '${tmp.path}/$audioName';
+      final prepared = await ant.prepareSession(id, job.raw, raw: true, out: kept, onProgress: (f) => _at(id, Stage.saving, f));
+      await notebook.vault.attach(audioPath, File(kept), 'audio/mp4');
       await _edit(id, (text) => _insertBeforeMarker(text, id, '![[$audioName]]'));
 
       // 2. The language, and the recognizer for it.
@@ -274,32 +275,17 @@ class Recordings extends ChangeNotifier {
           ? used!.language
           : (detection?.candidates.firstOrNull?.$1 ?? '');
 
-      var words = heard?.words ?? const <TimedWord>[];
-      var speakers = 1;
-      var aligned = false;
+      // Speakers and refined word times come with Clean up, when asked for.
+      final words = heard?.words ?? const <TimedWord>[];
+      const speakers = 1;
       if (words.isNotEmpty && heard!.timed) {
-        // 3. Speakers, then tighter word times.
-        _at(id, Stage.speakers);
-        final who = await ant.diarize(id);
-        if (who != null && who.speakers > 1) {
-          words = assignSpeakers(words, who.turns);
-          speakers = speakerCount(words);
-        }
-        if (ant.status.value.align) {
-          _at(id, Stage.timing);
-          final refined = await ant.align(id, words, language);
-          if (refined != null) {
-            words = refined;
-            aligned = true;
-          }
-        }
         final spoken = SpokenWords(
           words: words,
           language: language,
           engine: used!.engine,
           duration: prepared.length.inMilliseconds / 1000,
           speakers: speakers,
-          aligned: aligned,
+          aligned: false,
           timed: heard.timed,
         );
         final json = File('${tmp.path}/words.json')..writeAsStringSync(spoken.toJson());
@@ -312,7 +298,6 @@ class Recordings extends ChangeNotifier {
       final info = [
         if (job.newNote) '#recording',
         if (language.isNotEmpty) languageName(language),
-        if (speakers > 1) '$speakers speakers',
         if (used?.engine == Engine.device) 'phone recognizer',
       ].join(' · ');
       final summaryId = transcript.isNotEmpty && canSummarise() ? id : null;
@@ -366,74 +351,126 @@ class Recordings extends ChangeNotifier {
     }
   }
 
-  /// Audio being transcribed again (by its path in the notes), and why the last try failed.
+  /// Recordings being cleaned up (by their audio's path in the notes), the step each is at, and why the last try
+  /// failed.
   final again = <String>{};
+  final againStage = <String, Stage>{};
   final againFailed = <String, String>{};
 
-  /// Hear the recording [audio] (beside the note at [notePath]) again in
-  /// [language]: Voz when it knows it, else the phone's on-device recognizer.
-  /// Its transcript in the note and its word times are replaced; the cleaned
-  /// audio is read as it is (no cleaning twice).
-  Future<void> transcribeAgain(String notePath, String audio, String language) async {
+  /// Clean up the recording [audio] (beside the note at [notePath]), each step only if asked for:
+  /// [clean] the audio with Clear (the kept audio replaced); [transcribe] it again, in [language] or the one Ear
+  /// hears; then tell its [speakers] apart and refine every word's [timing]. Speakers and timing need a fresh
+  /// transcript, so they come with [transcribe]. The note's transcript and word times are replaced.
+  Future<void> cleanUp(
+    String notePath,
+    String audio, {
+    bool clean = false,
+    bool transcribe = false,
+    bool speakers = false,
+    bool timing = false,
+    String? language,
+  }) async {
     final note = notebook.byPath(notePath);
-    if (note == null) return;
+    if (note == null || !(clean || transcribe)) return;
     final audioPath = note.folder.isEmpty ? audio : '${note.folder}/$audio';
     if (!again.add(audioPath)) return;
     againFailed.remove(audioPath);
-    notifyListeners();
+    void at(Stage s) {
+      againStage[audioPath] = s;
+      notifyListeners();
+    }
+
     final id = 'again-${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}';
     final tmp = Directory.systemTemp.createTempSync('again');
     try {
       final source = await notebook.vault.locate(audioPath);
       if (source == null) throw StateError('The audio is no longer next to this note.');
-      final prepared = await ant.prepareSession(id, source);
-      var engine = vozLanguages.contains(language) ? transcriber() : Engine.device;
-      var heard = switch (engine) {
-        Engine.voz => await ant.transcribeVoz(id),
-        Engine.phonon => await ant.transcribePhonon(id, language),
-        Engine.device => await ant.transcribeOnDevice(id, language),
-      };
-      if (heard == null && engine == Engine.phonon) {
-        engine = Engine.voz;
-        heard = await ant.transcribeVoz(id);
+      // 1. Clean the audio: what is heard next is the cleaned audio, and it is what is kept.
+      at(clean ? Stage.cleaning : Stage.saving);
+      final cleaned = '${tmp.path}/$audio';
+      final prepared = await ant.prepareSession(id, source, out: clean ? cleaned : null, clean: clean);
+      if (clean) {
+        if (!prepared.enhanced) throw StateError(prepared.problem ?? 'The audio could not be cleaned.');
+        await notebook.vault.attach(audioPath, File(cleaned), 'audio/mp4');
       }
-      if (heard == null) throw StateError('No recognizer for ${languageName(language)} on this phone.');
-      if (heard.problem != null) throw StateError(heard.problem!);
+      if (!transcribe) return;
+
+      // 2. Transcribe it again: in the language asked for, else the one Ear hears.
+      at(Stage.language);
+      final List<Attempt> attempts;
+      if (language != null) {
+        final engine = vozLanguages.contains(language) ? transcriber() : Engine.device;
+        attempts = [(engine: engine, language: language), if (engine == Engine.phonon) (engine: Engine.voz, language: language)];
+      } else {
+        final detection = await ant.identify(id);
+        attempts = routeFor(detection?.candidates ?? const [], reliable: detection?.reliable ?? false, prefer: transcriber());
+      }
+      at(Stage.transcribing);
+      Heard? heard;
+      Attempt? used;
+      final problems = <String>[];
+      for (final a in attempts) {
+        final h = switch (a.engine) {
+          Engine.voz => await ant.transcribeVoz(id),
+          Engine.phonon => await ant.transcribePhonon(id, a.language),
+          Engine.device => await ant.transcribeOnDevice(id, a.language),
+        };
+        if (h == null) continue;
+        if (h.problem != null) {
+          problems.add(h.problem!);
+          continue;
+        }
+        heard = h;
+        used = a;
+        break;
+      }
+      if (heard == null || used == null) {
+        throw StateError(problems.isNotEmpty ? problems.join(' ') : 'No recognizer for this language on this phone.');
+      }
+
+      // 3. Speakers, then tighter word times.
       var words = heard.words;
-      var speakers = 1;
+      var count = 1;
       var aligned = false;
       if (heard.timed && words.isNotEmpty) {
-        final who = await ant.diarize(id);
-        if (who != null && who.speakers > 1) {
-          words = assignSpeakers(words, who.turns);
-          speakers = speakerCount(words);
+        if (speakers) {
+          at(Stage.speakers);
+          final who = await ant.diarize(id);
+          if (who != null && who.speakers > 1) {
+            words = assignSpeakers(words, who.turns);
+            count = speakerCount(words);
+          }
         }
-        final refined = ant.status.value.align ? await ant.align(id, words, language) : null;
-        if (refined != null) {
-          words = refined;
-          aligned = true;
+        if (timing && ant.status.value.align) {
+          at(Stage.timing);
+          final refined = await ant.align(id, words, used.language);
+          if (refined != null) {
+            words = refined;
+            aligned = true;
+          }
         }
+        final spoken = SpokenWords(
+          words: words,
+          language: used.language,
+          engine: used.engine,
+          duration: prepared.length.inMilliseconds / 1000,
+          speakers: count,
+          aligned: aligned,
+          timed: heard.timed,
+        );
+        final json = File('${tmp.path}/words.json')..writeAsStringSync(spoken.toJson());
+        await notebook.vault.attach(wordsFileFor(audioPath), json, 'application/json');
       }
-      final spoken = SpokenWords(
-        words: words,
-        language: language,
-        engine: engine,
-        duration: prepared.length.inMilliseconds / 1000,
-        speakers: speakers,
-        aligned: aligned,
-        timed: heard.timed,
-      );
-      final json = File('${tmp.path}/words.json')..writeAsStringSync(spoken.toJson());
-      await notebook.vault.attach(wordsFileFor(audioPath), json, 'application/json');
       final fresh = notebook.byPath(notePath);
       if (fresh != null) {
-        final next = withTranscript(fresh.text, audio, transcriptMarkdown(words, speakers: speakers));
+        final next = withTranscript(fresh.text, audio, transcriptMarkdown(words, speakers: count));
         if (next != fresh.text) await notebook.save(notePath, next);
       }
     } on Object catch (error) {
       againFailed[audioPath] = '$error'.replaceFirst('Bad state: ', '');
     } finally {
       again.remove(audioPath);
+      againStage.remove(audioPath);
       await ant.closeSession(id);
       try {
         tmp.deleteSync(recursive: true);

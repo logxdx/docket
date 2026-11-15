@@ -17,8 +17,12 @@ import '../../core/voice/recording.dart';
 import '../../core/voice/spoken.dart';
 import 'audio_player.dart';
 
+/// What Clean up does to a recording, each step only if on: [clean] the audio (Clear), [transcribe] it again (in
+/// [language], or the one heard), and with a new transcript tell [speakers] apart and refine each word's [timing].
+typedef CleanUpChoice = ({bool clean, bool transcribe, bool speakers, bool timing, String? language});
+
 class SpokenTranscript extends StatefulWidget {
-  const SpokenTranscript({super.key, required this.part, required this.playback, required this.loadWords, this.onAgain});
+  const SpokenTranscript({super.key, required this.part, required this.playback, required this.loadWords, this.onCleanUp});
 
   final SpokenPart part;
 
@@ -28,8 +32,8 @@ class SpokenTranscript extends StatefulWidget {
   /// The word times beside the audio.
   final Future<SpokenWords?> Function() loadWords;
 
-  /// Transcribe the recording again in a language picked; null when the notes are read only.
-  final Future<void> Function(String language)? onAgain;
+  /// Clean the recording up as chosen; null when the notes are read only.
+  final Future<void> Function(CleanUpChoice choice)? onCleanUp;
 
   @override
   State<SpokenTranscript> createState() => _SpokenTranscriptState();
@@ -254,14 +258,14 @@ class _SpokenTranscriptState extends State<SpokenTranscript> with SingleTickerPr
           Icon(Icons.graphic_eq_rounded, size: 20, color: accent),
           const SizedBox(width: 10),
           Expanded(child: Text('Transcript', style: theme.textTheme.titleSmall)),
-          if (widget.onAgain != null)
+          if (widget.onCleanUp != null)
             _busy
                 ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
                 : IconButton(
-                    tooltip: 'Transcribe again in…',
+                    tooltip: 'Clean up…',
                     visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.translate_rounded, size: 20),
-                    onPressed: _pickLanguage,
+                    icon: const Icon(Icons.auto_fix_high_rounded, size: 20),
+                    onPressed: _cleanUp,
                   ),
         ]),
         if (about.isNotEmpty)
@@ -277,43 +281,19 @@ class _SpokenTranscriptState extends State<SpokenTranscript> with SingleTickerPr
 
   bool _busy = false;
 
-  /// Pick the language the recording is in, and hear it again in that one.
-  Future<void> _pickLanguage() async {
-    final current = _words?.language ?? '';
-    final picked = await showModalBottomSheet<String>(
+  /// Choose what to do to the recording, and do it.
+  Future<void> _cleanUp() async {
+    final status = ServicesScope.of(context).ant.status.value;
+    final choice = await showModalBottomSheet<CleanUpChoice>(
       context: context,
       showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-            child: Text(
-              'Transcribe again in… Voz hears its 25 languages; others go to the phone\'s own offline recognizer. '
-              'Edits to this transcript are replaced.',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ),
-          Flexible(
-            child: ListView(shrinkWrap: true, children: [
-              for (final code in pickableLanguages)
-                ListTile(
-                  dense: true,
-                  title: Text(languageName(code)),
-                  subtitle: Text(vozLanguages.contains(code)
-                      ? (ServicesScope.of(context).transcriber == Engine.phonon ? 'Phonon' : 'Voz')
-                      : 'Phone recognizer'),
-                  trailing: code == current ? const Icon(Icons.check_rounded) : null,
-                  onTap: () => Navigator.pop(context, code),
-                ),
-            ]),
-          ),
-        ]),
-      ),
+      isScrollControlled: true,
+      builder: (context) => _CleanUpSheet(canClean: status.has('clear'), canTime: status.align, current: _words?.language),
     );
-    if (picked == null || !mounted) return;
+    if (choice == null || !mounted) return;
     setState(() => _busy = true);
     try {
-      await widget.onAgain!(picked);
+      await widget.onCleanUp!(choice);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -396,6 +376,127 @@ class TranscribingCard extends StatelessWidget {
           ]),
         );
       },
+    );
+  }
+}
+
+/// Clean up's choices, each a switch: the audio cleaned, transcribed again (in a language picked, or the one
+/// heard), speakers told apart and word times refined (these two only with a new transcript).
+class _CleanUpSheet extends StatefulWidget {
+  const _CleanUpSheet({required this.canClean, required this.canTime, required this.current});
+
+  final bool canClean;
+  final bool canTime;
+  final String? current;
+
+  @override
+  State<_CleanUpSheet> createState() => _CleanUpSheetState();
+}
+
+class _CleanUpSheetState extends State<_CleanUpSheet> {
+  late bool _clean = widget.canClean;
+  bool _transcribe = true;
+  bool _speakers = true;
+  late bool _timing = widget.canTime;
+  String? _language;
+
+  Future<void> _pickLanguage() async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView(shrinkWrap: true, children: [
+          ListTile(
+            title: const Text('Detect it'),
+            subtitle: const Text('Ear hears the language'),
+            trailing: _language == null ? const Icon(Icons.check_rounded) : null,
+            onTap: () => Navigator.pop(context, ''),
+          ),
+          for (final code in pickableLanguages)
+            ListTile(
+              dense: true,
+              title: Text(languageName(code)),
+              subtitle: Text(vozLanguages.contains(code) ? 'Phonon' : 'Phone recognizer'),
+              trailing: code == _language ? const Icon(Icons.check_rounded) : null,
+              onTap: () => Navigator.pop(context, code),
+            ),
+        ]),
+      ),
+    );
+    if (picked != null) setState(() => _language = picked.isEmpty ? null : picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+            child: Text('Clean up', style: theme.textTheme.titleLarge),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text('Each step is yours to leave out. All of it runs on this phone.',
+                style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+          ),
+          SwitchListTile(
+            value: _clean,
+            onChanged: widget.canClean ? (on) => setState(() => _clean = on) : null,
+            title: const Text('Clean the audio'),
+            subtitle: Text(widget.canClean
+                ? 'Clear takes out noise and room echo; the cleaned audio replaces the recording.'
+                : 'Clear is not on this phone.'),
+          ),
+          SwitchListTile(
+            value: _transcribe,
+            onChanged: (on) => setState(() => _transcribe = on),
+            title: const Text('Transcribe again'),
+            subtitle: const Text('Edits to this transcript are replaced.'),
+          ),
+          ListTile(
+            enabled: _transcribe,
+            contentPadding: const EdgeInsets.only(left: 32, right: 24),
+            title: const Text('Language'),
+            trailing: Text(_language == null ? 'Detect it' : languageName(_language!)),
+            onTap: _pickLanguage,
+          ),
+          SwitchListTile(
+            value: _transcribe && _speakers,
+            onChanged: _transcribe ? (on) => setState(() => _speakers = on) : null,
+            title: const Text('Tell speakers apart'),
+            subtitle: const Text('Who marks who said what.'),
+          ),
+          SwitchListTile(
+            value: _transcribe && _timing,
+            onChanged: _transcribe && widget.canTime ? (on) => setState(() => _timing = on) : null,
+            title: const Text('Time every word'),
+            subtitle: Text(widget.canTime ? 'Align refines each word\'s time, for reading along.' : 'Align is not on this phone.'),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: FilledButton(
+                onPressed: _clean || _transcribe
+                    ? () => Navigator.pop<CleanUpChoice>(context, (
+                          clean: _clean,
+                          transcribe: _transcribe,
+                          speakers: _transcribe && _speakers,
+                          timing: _transcribe && _timing,
+                          language: _language,
+                        ))
+                    : null,
+                child: const Text('Clean up'),
+              ),
+            ),
+          ),
+        ]),
+      ),
     );
   }
 }

@@ -28,27 +28,30 @@ flutter build apk --debug
   tappable checkboxes, daily journaling prompts.
 - **Graph** of links, laid out off the UI isolate (`graph.dart`).
 - **Recording** (`record_screen.dart`, `lib/app/recordings.dart`): the
-  microphone at 48 kHz, then, on the phone and in the background, with
-  [Desert Ant](https://desertant.com)'s models (`lib/app/desert_ant.dart`,
-  `android/.../DesertAntBridge.kt`):
-  1. **Clear** cleans the audio (noise and room echo gone, loudness evened);
-     it is kept beside the note as `.m4a`;
+  microphone at 48 kHz, the words shown live as they are said, then, on the
+  phone and in the background, with [Desert Ant](https://desertant.com)'s
+  models (`lib/app/desert_ant.dart`, `android/.../DesertAntBridge.kt`):
+  1. the audio is kept beside the note as recorded (`.m4a`);
   2. **Ear** names the language, and the right recognizer hears it
-     (`routeFor` in `lib/core/voice/spoken.dart`): **Voz** for its 25
-     European languages, else the phone's own *on-device* recognizer
-     (Android 13+, word times from 14), never a model that would return
-     confident nonsense; *Transcribe again in…* picks the language by hand;
-  3. **Who** tells the speakers apart; **Align** tightens every word's time;
-  4. the transcript goes in the note as plain, editable Markdown
-     ("**Speaker 1** · 0:42", the name yours to change), the word times
-     beside the audio (`<audio>.words.json`). Playing the audio lights up
-     each word as it is said, even after the text was edited
-     (`timesFor`), and tapping a word plays from there;
-  5. a new note gets its **properties** (YAML front matter, as Obsidian
-     keeps them): a `title` and a `description` (**Title**) and topic
-     `tags` (**Gist**).
+     (`routeFor` in `lib/core/voice/spoken.dart`): Fermion Research's
+     **Phonon-2.5** (or **Voz**) for their 25 European languages, else the
+     phone's own *on-device* recognizer (Android 13+, word times from 14),
+     never a model that would return confident nonsense;
+  3. the transcript goes in the note as plain, editable Markdown, the word
+     times beside the audio (`<audio>.words.json`). Playing the audio lights
+     up each word as it is said, even after the text was edited (`timesFor`),
+     and tapping a word plays from there;
+  4. a new note gets its **properties** (YAML front matter, as Obsidian keeps
+     them): a `title` and a `description` (**Title**) and topic `tags`
+     (**Gist**).
+  **Clean up** on a transcript does the rest, each step only if wanted:
+  **Clear** cleans the audio (noise and room echo gone, loudness evened) and
+  replaces the recording; it is transcribed again (in a language picked, or
+  the one Ear hears); **Who** tells the speakers apart ("**Speaker 1** ·
+  0:42", the name yours to change); **Align** tightens every word's time.
   Saving is instant; a recording interrupted by the app closing carries on
-  at the next start. With a model server set (Settings › AI), a summary is written too.
+  at the next start. With a model server set (Settings › AI), a summary is
+  written too.
 - **Typed notes**, as they are saved (`lib/app/enricher.dart`): front matter
   (`lib/core/notes/properties.dart`): topic
   `tags` for a note with none (**Gist**), a `description` for one without

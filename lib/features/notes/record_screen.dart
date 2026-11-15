@@ -1,11 +1,11 @@
 /// Record a meeting, a lecture or a note to self, into a new note or at the
-/// end of one ([RecordScreen.into]). The words appear as they are said (Voz's
+/// end of one ([RecordScreen.into]). The words appear as they are said (the
 /// live session: settled words, and dimmed the ones it may still revise).
-/// Hold pauses, Save keeps it at once: the
-/// note opens straight away and fills in on the phone, in the background
-/// (lib/app/recordings.dart): the audio cleaned, the language detected, the
-/// words transcribed with their times, the speakers told apart, a title and
-/// topics. Nothing is sent anywhere.
+/// Hold pauses, Save keeps it at once: the note opens straight away and fills
+/// in on the phone, in the background (lib/app/recordings.dart): the audio as
+/// recorded, the language detected, the words transcribed with their times, a
+/// title and topics. Cleaning the audio, speakers and refined word times are
+/// the transcript's Clean up, when wanted. Nothing is sent anywhere.
 library;
 
 import 'dart:async';
@@ -270,8 +270,8 @@ class _RecordScreenState extends State<RecordScreen> {
       ),
       const SizedBox(height: 10),
       Text(
-        'Live words are a preview. On Save the cleaned recording is transcribed whole, with speakers and '
-        'a title. Nothing leaves the phone.',
+        'Live words are a preview. On Save the recording is transcribed whole and the note named; Clean up on its '
+        'transcript cleans the audio and tells speakers apart. Nothing leaves the phone.',
         style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant, height: 1.4),
       ),
     ]);
@@ -286,8 +286,8 @@ class _RecordScreenState extends State<RecordScreen> {
       ),
       const SizedBox(height: 20),
       Text(
-        'On Save, this phone cleans the audio, detects the language, writes every word with its '
-        'time and who said it, and names the note. Nothing leaves the phone.',
+        'On Save, this phone detects the language, writes every word with its time, and names the note. '
+        'Clean up on the transcript cleans the audio and tells speakers apart. Nothing leaves the phone.',
         style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant, height: 1.45),
       ),
     ]);
