@@ -448,7 +448,7 @@ class _CleanUpSheetState extends State<_CleanUpSheet> {
             onChanged: widget.canClean ? (on) => setState(() => _clean = on) : null,
             title: const Text('Clean the audio'),
             subtitle: Text(widget.canClean
-                ? 'Clear takes out noise and room echo; the cleaned audio replaces the recording.'
+                ? 'Clear takes out noise and room echo (far-off voices too). The recording as made is kept.'
                 : 'Clear is not on this phone.'),
           ),
           SwitchListTile(

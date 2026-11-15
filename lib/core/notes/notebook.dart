@@ -69,9 +69,16 @@ String _plain(String line) => line
 final _link = RegExp(r'\[\[([^\[\]|#\n]+)(?:#[^\[\]|\n]*)?(?:\|[^\[\]\n]*)?\]\]');
 final _fence = RegExp(r'```[\s\S]*?```|`[^`\n]*`');
 
-/// Link targets in [text], as written: "Project X" for [[Project X|the project]].
-List<String> parseLinks(String text) =>
-    [for (final m in _link.allMatches(text.replaceAll(_fence, ''))) m[1]!.trim()];
+/// Files a note embeds that are not notes: audio, pictures, video, PDFs, word times.
+final _attachment = RegExp(r'\.(?:m4a|mp3|wav|ogg|opus|webm|aac|flac|3gp|png|jpe?g|gif|webp|bmp|svg|avif|mp4|mov|mkv|pdf|json)$',
+    caseSensitive: false);
+
+/// Link targets in [text], as written: "Project X" for [[Project X|the project]]. Embedded files that are not
+/// notes (![[Recording.m4a]]) are not links to notes.
+List<String> parseLinks(String text) => [
+      for (final m in _link.allMatches(text.replaceAll(_fence, '')))
+        if (!_attachment.hasMatch(m[1]!.trim())) m[1]!.trim(),
+    ];
 
 /// #tags outside code, headings excluded ("# Title" is not a tag; "#idea" is),
 /// and the front matter's `tags:`, as Obsidian has them.

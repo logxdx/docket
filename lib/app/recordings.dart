@@ -372,7 +372,8 @@ class Recordings extends ChangeNotifier {
   }) async {
     final note = notebook.byPath(notePath);
     if (note == null || !(clean || transcribe)) return;
-    final audioPath = note.folder.isEmpty ? audio : '${note.folder}/$audio';
+    String inFolder(String name) => note.folder.isEmpty ? name : '${note.folder}/$name';
+    final audioPath = inFolder(audio);
     if (!again.add(audioPath)) return;
     againFailed.remove(audioPath);
     void at(Stage s) {
@@ -383,15 +384,28 @@ class Recordings extends ChangeNotifier {
     final id = 'again-${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}';
     final tmp = Directory.systemTemp.createTempSync('again');
     try {
-      final source = await notebook.vault.locate(audioPath);
+      // Cleaning starts from the recording as made, never from a cleaned copy.
+      final original = cleanedFrom(audio);
+      final from = clean && original != null && await notebook.vault.locate(inFolder(original)) != null
+          ? inFolder(original)
+          : audioPath;
+      final source = await notebook.vault.locate(from);
       if (source == null) throw StateError('The audio is no longer next to this note.');
-      // 1. Clean the audio: what is heard next is the cleaned audio, and it is what is kept.
+      // 1. Clean the audio. The recording as made stays beside the note; the cleaned copy goes next to it, and the
+      // note plays (and is transcribed from) the copy.
       at(clean ? Stage.cleaning : Stage.saving);
-      final cleaned = '${tmp.path}/$audio';
+      final cleanName = cleanedName(original ?? audio);
+      final cleaned = '${tmp.path}/$cleanName';
       final prepared = await ant.prepareSession(id, source, out: clean ? cleaned : null, clean: clean);
+      var playing = audio;
       if (clean) {
         if (!prepared.enhanced) throw StateError(prepared.problem ?? 'The audio could not be cleaned.');
-        await notebook.vault.attach(audioPath, File(cleaned), 'audio/mp4');
+        await notebook.vault.attach(inFolder(cleanName), File(cleaned), 'audio/mp4');
+        final fresh = notebook.byPath(notePath);
+        if (fresh != null && cleanName != audio) {
+          await notebook.save(notePath, fresh.text.replaceAll('![[$audio]]', '![[$cleanName]]'));
+        }
+        playing = cleanName;
       }
       if (!transcribe) return;
 
@@ -459,11 +473,11 @@ class Recordings extends ChangeNotifier {
           timed: heard.timed,
         );
         final json = File('${tmp.path}/words.json')..writeAsStringSync(spoken.toJson());
-        await notebook.vault.attach(wordsFileFor(audioPath), json, 'application/json');
+        await notebook.vault.attach(wordsFileFor(inFolder(playing)), json, 'application/json');
       }
       final fresh = notebook.byPath(notePath);
       if (fresh != null) {
-        final next = withTranscript(fresh.text, audio, transcriptMarkdown(words, speakers: count));
+        final next = withTranscript(fresh.text, playing, transcriptMarkdown(words, speakers: count));
         if (next != fresh.text) await notebook.save(notePath, next);
       }
     } on Object catch (error) {
@@ -503,6 +517,18 @@ class Recordings extends ChangeNotifier {
 }
 
 String _two(int n) => n.toString().padLeft(2, '0');
+
+/// The name of [audio]'s cleaned copy: "Recording 2026-11-15 103034 (clean).m4a".
+String cleanedName(String audio) {
+  final dot = audio.lastIndexOf('.');
+  return dot > 0 ? '${audio.substring(0, dot)} (clean)${audio.substring(dot)}' : '$audio (clean)';
+}
+
+/// The recording a cleaned copy [audio] was made from, or null when it is not one.
+String? cleanedFrom(String audio) {
+  final m = RegExp(r'^(.*) \(clean\)(\.[^.]+)?$').firstMatch(audio);
+  return m == null ? null : '${m[1]}${m[2] ?? ''}';
+}
 
 /// [text] with [line] (and a blank line) just above [id]'s marker.
 String _insertBeforeMarker(String text, String id, String line) {

@@ -9,6 +9,7 @@ void main() {
     const text = '---\ntags: x\n---\n# Heading\nSee [[Project X|the project]] and [[Daily/2026-10-24#Plans]].\n'
         'Ideas #idea #work/q4, not #1 or `#code`.\n```\n[[fenced]] #fenced\n```';
     expect(parseLinks(text), ['Project X', 'Daily/2026-10-24']);
+    expect(parseLinks('![[Recording 1.m4a]] ![[photo.JPG|200]] [[Plan v1.2]] ![[Plan]]'), ['Plan v1.2', 'Plan']);
     expect(parseTags(text), {'x', 'idea', 'work/q4'});
     expect(fileName('What: a/b?'), 'What a b');
   });

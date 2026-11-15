@@ -3,6 +3,12 @@ import 'package:notes_app/app/recordings.dart';
 import 'package:notes_app/core/voice/recording.dart';
 
 void main() {
+  test('a cleaned copy is named beside its recording, and leads back to it', () {
+    expect(cleanedName('Recording 2026-11-15 103034.m4a'), 'Recording 2026-11-15 103034 (clean).m4a');
+    expect(cleanedFrom('Recording 2026-11-15 103034 (clean).m4a'), 'Recording 2026-11-15 103034.m4a');
+    expect(cleanedFrom('Recording 2026-11-15 103034.m4a'), isNull);
+  });
+
   final when = DateTime(2026, 11, 14, 9, 5);
 
   test('a new recording starts as a draft the transcript replaces', () {
