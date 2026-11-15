@@ -240,7 +240,7 @@ object Audio {
 
     /**
      * 48 kHz to 16 kHz for the speech models, streamed across chunks: a 97-tap Blackman-windowed
-     * sinc low-pass at 7.2 kHz, then every third sample. Ear, Voz and Who would resample on
+     * sinc low-pass at 7.2 kHz, then every third sample. Ear and Who would resample on
      * their own; doing it once here keeps one 16 kHz copy of the recording instead of three
      * 48 kHz ones, a third of the memory.
      */

@@ -1,8 +1,8 @@
-/// Desert Ant's on-device models (DesertAntBridge.kt), from Dart. Nothing
-/// here touches the network: the models come with the app and run on the
-/// phone. Where the bridge is missing (tests, a platform without it) every
-/// call answers "not available" rather than throwing, and the notes do
-/// without.
+/// Desert Ant's on-device models (DesertAntBridge.kt), from Dart. They run on
+/// the phone; the APK carries the recognizer, and the Desert Ant models are
+/// downloaded from Hugging Face when the user asks ([download]), once. Where
+/// the bridge is missing (tests, a platform without it) every call answers
+/// "not available" rather than throwing, and the notes do without.
 library;
 
 import 'dart:async';
@@ -21,11 +21,14 @@ class ModelStatus {
     this.title = false,
     this.phonon = false,
     this.speech = false,
-    this.importable = const [],
+    this.downloads = const {},
   });
 
-  /// Models the APK leaves out that the user can import (Voz).
-  final List<String> importable;
+  /// The models to download (the Desert Ant ones), and the bytes each takes.
+  final Map<String, int> downloads;
+
+  /// Bytes of the models to download that are not on the phone yet.
+  int get missingBytes => downloads.entries.where((e) => !ready.contains(e.key)).fold(0, (n, e) => n + e.value);
 
   final List<String> bundled;
   final List<String> ready;
@@ -64,8 +67,8 @@ class DesertAnt {
   /// Why the last reading stopped, when it failed.
   final readingError = ValueNotifier<String?>(null);
 
-  /// Importing a model the user picked (Voz): 0..1, null when not.
-  final importing = ValueNotifier<double?>(null);
+  /// Models being downloaded: id -> 0..1.
+  final downloading = ValueNotifier<Map<String, double>>(const {});
 
   /// Copying the models into place on first launch: 0..1, null when not.
   final installing = ValueNotifier<double?>(null);
@@ -75,7 +78,7 @@ class DesertAnt {
 
   final _progress = <String, void Function(double)>{};
 
-  /// The words heard so far while recording (Voz's live session): settled ones will not
+  /// The words heard so far while recording (the live session): settled ones will not
   /// change; tentative ones may, on the next pass.
   final live = ValueNotifier<({List<String> settled, List<String> tentative})>((settled: const [], tentative: const []));
 
@@ -89,8 +92,11 @@ class DesertAnt {
           settled: [...(m['settled'] as List).cast<String>()],
           tentative: [...(m['tentative'] as List).cast<String>()],
         );
-      case 'models.importProgress':
-        importing.value = (call.arguments as num).toDouble();
+      case 'models.downloadProgress':
+        final m = call.arguments as Map;
+        if (downloading.value.containsKey(m['id'])) {
+          downloading.value = {...downloading.value, m['id'] as String: (m['fraction'] as num).toDouble()};
+        }
       case 'speech.sentence':
         reading.value = (index: (call.arguments as Map)['index'] as int, playing: true);
       case 'speech.done':
@@ -131,7 +137,7 @@ class DesertAnt {
         align: m['align'] == true,
         title: m['title'] == true,
         phonon: m['phonon'] == true,
-        importable: [...((m['importable'] as List?) ?? const []).cast<String>()],
+        downloads: {for (final e in ((m['downloads'] as Map?) ?? const {}).entries) e.key as String: (e.value as num).toInt()},
         speech: m['speech'] == true,
       );
 
@@ -150,25 +156,25 @@ class DesertAnt {
     }
   }
 
-  /// Let the user pick several files (a model's files, or a .zip of them); their references, or null.
-  Future<List<String>?> pickFiles() async {
+  /// Download model [id] from Hugging Face (its pinned revision; every file checked against its size and
+  /// checksum); [downloading] follows. Throws (PlatformException) with what went wrong, a stop included.
+  Future<void> download(String id) async {
+    downloading.value = {...downloading.value, id: 0};
     try {
-      return (await _permissions.invokeMethod<List>('pickFiles'))?.cast<String>();
-    } on MissingPluginException {
-      return null;
+      final m = await _channel.invokeMethod<Map>('models.download', {'id': id});
+      if (m != null) status.value = _status(m);
+    } finally {
+      downloading.value = {...downloading.value}..remove(id);
     }
   }
 
-  /// Import model [id] from the picked [uris]; each file is checked against its pinned size and checksum.
-  /// Throws (PlatformException) with what is missing or wrong.
-  Future<void> importModel(String id, List<String> uris) async {
-    importing.value = 0;
-    try {
-      final m = await _channel.invokeMethod<Map>('models.import', {'id': id, 'uris': uris});
-      if (m != null) status.value = _status(m);
-    } finally {
-      importing.value = null;
-    }
+  /// Stop downloading [id] (the files done are kept, for next time).
+  Future<void> cancelDownload(String id) async => _call<void>('models.cancel', {'id': id});
+
+  /// Take the downloaded model [id] off the phone.
+  Future<void> removeModel(String id) async {
+    final m = await _call<Map>('models.remove', {'id': id});
+    if (m != null) status.value = _status(m);
   }
 
   /// Add the voice file at [path] as [name]; throws (PlatformException) with why when it is not a valid voice.
@@ -287,9 +293,6 @@ class DesertAnt {
       reliable: m['reliable'] == true,
     );
   }
-
-  /// Voz's words, or null when Voz is not on the phone.
-  Future<Heard?> transcribeVoz(String id) async => _heard(await _call<Map>('session.voz', {'id': id}));
 
   /// Phonon-2.5's words (its English model for 'en', the 25-language one otherwise), or null
   /// when Phonon cannot run on this phone (no model, or not an arm64 phone).

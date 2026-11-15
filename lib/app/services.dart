@@ -14,7 +14,6 @@ import '../core/ai/model.dart';
 import '../core/ai/prompts.dart';
 import '../core/notes/notebook.dart';
 import '../core/notes/vault.dart';
-import '../core/voice/spoken.dart' show Engine;
 import '../core/voice/summaries.dart';
 import 'desert_ant.dart';
 import 'enricher.dart';
@@ -158,19 +157,7 @@ class Services {
     summaries: summaries,
     canSummarise: () => model != null,
     enabled: autoEnabled,
-    transcriber: () => transcriber,
   );
-
-  /// Settings › Transcript model: which model writes a recording's transcript after Save. Phonon unless
-  /// Voz was chosen and is on the phone (the APK leaves Voz out; the user can import it).
-  Engine get transcriber {
-    final status = ant.status.value;
-    if (settings.get('transcriber') == 'voz' && status.has('voz')) return Engine.voz;
-    if (status.phonon || !status.has('voz')) return Engine.phonon;
-    return Engine.voz;
-  }
-
-  set transcriber(Engine e) => settings.set('transcriber', e.name);
 
   /// Emoji, tags and titles for typed notes as they are saved.
   late final enricher = Enricher(notebook: notebook, ant: ant, enabled: autoEnabled);

@@ -20,7 +20,7 @@ import java.io.File
 import kotlin.coroutines.resume
 
 /**
- * The phone's own recognizer, for a language Voz does not know (Voz has 25 European
+ * The phone's own recognizer, for a language Phonon does not know (Phonon has 25 European
  * languages; Ear names 102). Strictly on the device: [SpeechRecognizer.createOnDeviceSpeechRecognizer]
  * never sends audio anywhere, and a language without an installed offline pack is reported,
  * not sent online. It reads the recording from a file (Android 13+) and, from Android 14,

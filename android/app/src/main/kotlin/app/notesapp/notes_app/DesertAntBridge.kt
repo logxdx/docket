@@ -4,14 +4,8 @@ import ai.desertant.clear.Clear
 import ai.desertant.clear.Options as ClearOptions
 import ai.desertant.ear.Ear
 import ai.desertant.gist.Gist
-import ai.desertant.voz.Voz
 import ai.desertant.who.Who
 import android.content.Context
-import android.net.Uri
-import android.provider.OpenableColumns
-import java.io.FilterInputStream
-import java.io.InputStream
-import java.util.zip.ZipInputStream
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -31,12 +25,12 @@ import java.util.concurrent.ConcurrentHashMap
  *  - the microphone ([Recorder]);
  *  - a recording's steps, each a call so the Dart side decides the route and keeps whatever
  *    a step gives even when a later one fails: prepare (Clear cleans the audio, written as
- *    .m4a, and a 16 kHz copy is kept here), identify (Ear), transcribe with Voz or with the
- *    phone's own on-device recognizer, diarize (Who), refine word times (Align);
+ *    .m4a, and a 16 kHz copy is kept here), identify (Ear), transcribe with Phonon-2.5 or with
+ *    the phone's own on-device recognizer, diarize (Who), refine word times (Align);
  *  - text: topics (Gist), a title (Title).
  *
- * Every model is built from the folder [OfflineModels] filled from the APK, and only when that
- * folder is complete, so nothing is downloaded: the app works with no network at all.
+ * Every model is built from the folder [OfflineModels] filled (from the APK, or downloaded when the
+ * user asked), and only when that folder is complete; a missing model is a step the notes do without.
  */
 class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
     private val channel = MethodChannel(engine.dartExecutor.binaryMessenger, "notes/desertant")
@@ -66,13 +60,13 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
     private val built = HashMap<String, AutoCloseable>()
 
     /**
-     * The models that take hundreds of MB to a few GB once loaded (Voz's encoder alone is 1.2 GB,
-     * and the runtime keeps a packed copy of its weights). Only one is kept at a time: loading one
-     * closes the others first, so a recording's steps never hold Clear, Ear and Voz together, which
+     * The models that take hundreds of MB once loaded (the runtime keeps a packed copy of their
+     * weights). Only one is kept at a time: loading one closes the others first, so a recording's
+     * steps never hold Clear, Ear and Phonon together, which
      * on a 4-6 GB phone gets the app killed by Android's low-memory killer. The last one stays
      * loaded, so using it again is quick. Gist is small and runs on every save: it stays.
      */
-    private val heavy = setOf("clear", "ear", "voz", "who", "phonon-en", "phonon-p25")
+    private val heavy = setOf("clear", "ear", "who", "phonon-en", "phonon-p25")
 
     @Suppress("UNCHECKED_CAST")
     @Synchronized
@@ -94,7 +88,6 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
 
     private fun clear() = model("clear") { Clear(context, it) }
     private fun ear() = model("ear") { Ear(context, it) }
-    private fun voz() = model("voz") { Voz(context, it) }
     private fun who() = model("who") { Who(context, it) }
     private fun gist() = model("gist") { Gist(context, it) }
 
@@ -153,21 +146,26 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
             status()
         }
         "models.status" -> status()
-        // A model the APK leaves out (Voz), from the files the user picked (or a .zip of them), each checked.
-        "models.import" -> work.withLock {
-            withContext(Dispatchers.IO) {
-                val id = call.argument<String>("id")!!
-                var last = -1
-                offline.import(id, importSources(call.argument<List<String>>("uris")!!.map(Uri::parse))) { done, total ->
-                    val pct = if (total > 0) (done * 100 / total).toInt() else 100
-                    if (pct != last) {
-                        last = pct
-                        scope.launch { channel.invokeMethod("models.importProgress", pct / 100.0) }
-                    }
+        // A Desert Ant model from Hugging Face (Settings › On-device models), each file checked.
+        "models.download" -> withContext(Dispatchers.IO) {
+            val id = call.argument<String>("id")!!
+            var last = -1
+            offline.download(id) { done, total ->
+                val pct = if (total > 0) (done * 1000 / total).toInt() else 1000
+                if (pct != last) {
+                    last = pct
+                    scope.launch { channel.invokeMethod("models.downloadProgress", mapOf("id" to id, "fraction" to pct / 1000.0)) }
                 }
-                built.remove(id)?.close()
-                status()
             }
+            status()
+        }
+        "models.cancel" -> offline.cancel(call.argument<String>("id")!!).let { null }
+        "models.remove" -> work.withLock {
+            val id = call.argument<String>("id")!!
+            synchronized(this) { built.remove(id)?.close() }
+            extras.release()
+            offline.remove(id)
+            status()
         }
 
         // Microphone
@@ -193,7 +191,6 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
         // A recording's steps
         "session.prepare" -> work.withLock { withContext(Dispatchers.Default) { prepare(call) } }
         "session.identify" -> work.withLock { identify(session(call)) }
-        "session.voz" -> work.withLock { transcribeVoz(session(call)) }
         "session.phonon" -> work.withLock {
             transcribePhonon(session(call), call.argument<String>("language") ?: "")
         }
@@ -252,28 +249,23 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
     }
 
     /**
-     * Words while recording: Voz's live session (LiveTranscriber) on the microphone, decimated
-     * to 16 kHz. A pass runs only when no other model job is (it never waits on, or unloads Voz
+     * Words while recording: Phonon-2.5's passes (LiveTranscriber) on the microphone, decimated
+     * to 16 kHz. A pass runs only when no other model job is (it never waits on, or unloads a model
      * under, an earlier recording still being processed); a skipped pass is caught up by the next.
      */
     private fun startLive() {
         stopLive()
-        // Phonon-2.5 (25 languages, no language needed up front) when it can run: a pass over the
-        // held audio takes a fraction of a second, so the words refresh every second. Voz otherwise.
-        val usePhonon = canPhonon
-        if (!usePhonon && !offline.isReady("voz")) return
+        // Phonon-2.5 (25 languages, no language needed up front): a pass over the held audio takes a
+        // fraction of a second, so the words refresh every second.
+        if (!canPhonon) return
         val decimator = Audio.Decimator()
         val transcriber = LiveTranscriber(
             liveScope,
             transcribe = { samples ->
                 if (!work.tryLock()) null
                 else try {
-                    if (usePhonon) {
-                        val pcm = ShortArray(samples.size) { (samples[it].coerceIn(-1f, 1f) * 32767f).toInt().toShort() }
-                        phonon("")?.transcribe(pcm)?.map { LiveTranscriber.Word(it.text, it.start, it.end) }
-                    } else {
-                        voz()?.transcribe(samples, 16_000.0)?.words?.map { LiveTranscriber.Word(it.text, it.start, it.end) }
-                    }
+                    val pcm = ShortArray(samples.size) { (samples[it].coerceIn(-1f, 1f) * 32767f).toInt().toShort() }
+                    phonon("")?.transcribe(pcm)?.map { LiveTranscriber.Word(it.text, it.start, it.end) }
                 } finally {
                     work.unlock()
                 }
@@ -301,36 +293,14 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
         live = null
     }
 
-    /** The picked files as (name, opener) pairs; a .zip's entries in its place, read in order. */
-    private fun importSources(uris: List<Uri>): Sequence<Pair<String, () -> InputStream>> = sequence {
-        val resolver = context.contentResolver
-        for (uri in uris) {
-            var name = uri.lastPathSegment ?: "file"
-            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-                if (it.moveToFirst()) name = it.getString(0) ?: name
-            }
-            if (name.endsWith(".zip", ignoreCase = true)) {
-                ZipInputStream(resolver.openInputStream(uri)!!.buffered(1 shl 20)).use { zip ->
-                    while (true) {
-                        val entry = zip.nextEntry ?: break
-                        if (entry.isDirectory) continue
-                        // The entry, as a stream its reader may close without closing the zip.
-                        yield(entry.name to { object : FilterInputStream(zip) { override fun close() {} } })
-                    }
-                }
-            } else {
-                yield(name to { resolver.openInputStream(uri)!! })
-            }
-        }
-    }
-
     private fun status(): Map<String, Any?> = mapOf(
         "bundled" to offline.bundledIds(),
-        // Ready: carried by the APK, or imported by the user (Voz), with every file in place.
-        "ready" to (offline.bundledIds() + offline.importableIds()).filter(offline::isReady),
+        // Ready: carried by the APK, or downloaded, with every file in place.
+        "ready" to (offline.bundledIds() + offline.downloadIds()).filter(offline::isReady),
         "align" to extras.canAlign,
         "phonon" to canPhonon,
-        "importable" to offline.importableIds(),
+        // The models to download, and the bytes each takes.
+        "downloads" to offline.downloadIds().associateWith { offline.sizeOf(it) },
         "speech" to reader.available(),
         "title" to extras.canTitle,
     )
@@ -436,12 +406,6 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
             "candidates" to d.candidates.map { listOf(it.language, it.probability) },
             "reliable" to d.isReliable,
         )
-    }
-
-    private suspend fun transcribeVoz(s: Session): Map<String, Any?>? {
-        val voz = voz() ?: return null
-        val t = voz.transcribe(s.samples, s.rate.toDouble())
-        return mapOf("text" to t.text, "words" to t.words.map { listOf(it.text, it.start, it.end) }, "timed" to true)
     }
 
     private suspend fun transcribePhonon(s: Session, language: String): Map<String, Any?>? {

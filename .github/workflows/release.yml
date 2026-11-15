@@ -1,4 +1,4 @@
-# A release on a v* tag: the APK (every model but Voz) and the Voz pack, on GitHub Releases.
+# A release on a v* tag: the APK (the Phonon models in it; the Desert Ant ones downloaded in the app), on GitHub Releases.
 # Every step is tool/release.sh, so `tool/release.sh vX.Y.Z --publish` does exactly this locally.
 name: Release
 on:

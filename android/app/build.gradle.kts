@@ -38,7 +38,7 @@ android {
     // fills .models/; OfflineModels.kt copies them out on first launch). Stored uncompressed:
     // the weights barely compress and inflating 1.7 GB would slow that first launch.
     // NOTES_BUNDLE_MODELS=0 leaves them out (a far smaller APK); push them instead with tool/push_models.sh.
-    // tool/stage_models.py stages them (all but Voz, which the user can import) into .models-bundle.
+    // tool/stage_models.py stages them (Phonon's; the Desert Ant models are downloaded in the app) into .models-bundle.
     if (System.getenv("NOTES_BUNDLE_MODELS") != "0") sourceSets["main"].assets.srcDir("../../.models-bundle")
     androidResources {
         noCompress += listOf("tflite", "f16", "f32", "i8", "bin", "json", "safetensors", "jinja")
@@ -100,7 +100,6 @@ dependencies {
     implementation("ai.desertant:core:$desertAnt")
     implementation("ai.desertant:clear:$desertAnt")
     implementation("ai.desertant:ear:$desertAnt")
-    implementation("ai.desertant:voz:$desertAnt")
     implementation("ai.desertant:who:$desertAnt")
     implementation("ai.desertant:gist:$desertAnt")
     // Align and Title for Android: built from Desert Ant's source and Docket's patches by

@@ -5,7 +5,7 @@
 ///
 ///  1. Clear cleans the audio (noise and room gone, loudness evened), kept
 ///     beside the note as .m4a;
-///  2. Ear names the language, and the right recognizer hears it: Voz, or
+///  2. Ear names the language, and the right recognizer hears it: Phonon-2.5, or
 ///     the phone's own on-device one ([routeFor]);
 ///  3. Who tells the speakers apart; Align tightens the word times;
 ///  4. the transcript goes in the note, the word times beside the audio
@@ -80,13 +80,9 @@ class Recordings extends ChangeNotifier {
     required this.summaries,
     required this.canSummarise,
     required this.enabled,
-    this.transcriber = _voz,
   });
 
-  static Engine _voz() => Engine.voz;
 
-  /// Settings › Saved transcript: Voz or Phonon.
-  final Engine Function() transcriber;
 
   final Notebook notebook;
   final DesertAnt ant;
@@ -103,7 +99,7 @@ class Recordings extends ChangeNotifier {
 
   final _queue = <RecordingJob>[];
 
-  /// While a recording is being made, earlier ones wait: its live words need Voz and the CPU.
+  /// While a recording is being made, earlier ones wait: its live words need Phonon and the CPU.
   bool _heldForRecording = false;
 
   void holdWhileRecording(bool on) {
@@ -245,8 +241,7 @@ class Recordings extends ChangeNotifier {
       // 2. The language, and the recognizer for it.
       _at(id, Stage.language);
       final detection = await ant.identify(id);
-      final attempts = routeFor(detection?.candidates ?? const [],
-          reliable: detection?.reliable ?? false, prefer: transcriber());
+      final attempts = routeFor(detection?.candidates ?? const [], reliable: detection?.reliable ?? false);
 
       _at(id, Stage.transcribing);
       Heard? heard;
@@ -254,15 +249,11 @@ class Recordings extends ChangeNotifier {
       final problems = <String>[if (prepared.problem != null) prepared.problem!];
       for (final a in attempts) {
         final h = switch (a.engine) {
-          Engine.voz => await ant.transcribeVoz(id),
           Engine.phonon => await ant.transcribePhonon(id, a.language),
           Engine.device => await ant.transcribeOnDevice(id, a.language),
         };
         if (h == null) {
-          // Phonon missing is not worth a note: Voz comes right after it.
-          if (a.engine != Engine.phonon) {
-            problems.add(a.engine == Engine.voz ? 'Voz is not on this phone.' : 'No on-device recognizer.');
-          }
+          problems.add(a.engine == Engine.phonon ? 'Phonon is not on this phone.' : 'No on-device recognizer.');
         } else if (h.problem != null) {
           problems.add(h.problem!);
         } else {
@@ -413,11 +404,10 @@ class Recordings extends ChangeNotifier {
       at(Stage.language);
       final List<Attempt> attempts;
       if (language != null) {
-        final engine = vozLanguages.contains(language) ? transcriber() : Engine.device;
-        attempts = [(engine: engine, language: language), if (engine == Engine.phonon) (engine: Engine.voz, language: language)];
+        attempts = [(engine: phononLanguages.contains(language) ? Engine.phonon : Engine.device, language: language)];
       } else {
         final detection = await ant.identify(id);
-        attempts = routeFor(detection?.candidates ?? const [], reliable: detection?.reliable ?? false, prefer: transcriber());
+        attempts = routeFor(detection?.candidates ?? const [], reliable: detection?.reliable ?? false);
       }
       at(Stage.transcribing);
       Heard? heard;
@@ -425,7 +415,6 @@ class Recordings extends ChangeNotifier {
       final problems = <String>[];
       for (final a in attempts) {
         final h = switch (a.engine) {
-          Engine.voz => await ant.transcribeVoz(id),
           Engine.phonon => await ant.transcribePhonon(id, a.language),
           Engine.device => await ant.transcribeOnDevice(id, a.language),
         };

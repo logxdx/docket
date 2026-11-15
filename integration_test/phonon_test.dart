@@ -1,5 +1,5 @@
-// Phonon on the phone: speech recognition (Phonon-2.5 English and 25-language) against Voz on the
-// same speech, timed; and the reading voice (Phonon TTS) reading two sentences aloud, its sentence
+// Phonon on the phone: speech recognition (Phonon-2.5 English and 25-language) on the same
+// speech, timed; and the reading voice (Phonon TTS) reading two sentences aloud, its sentence
 // events and its end. Prints PHONON lines. Run as the app's entry point (debug build), after
 // tool/push_models.sh:
 //   NOTES_BUNDLE_MODELS=0 flutter build apk --debug -t integration_test/phonon_test.dart
@@ -50,7 +50,7 @@ void main() {
 
   String text(Heard? h) => h?.words.map((w) => w.text).join(' ') ?? 'null';
 
-  testWidgets('Phonon recognizes, fast; Voz agrees', (tester) async {
+  testWidgets('Phonon recognizes, fast', (tester) async {
     final status = await ant.prepare();
     debugPrint('PHONON status phonon=${status.phonon} speech=${status.speech} ready=${status.ready}');
     expect(status.phonon, isTrue);
@@ -72,9 +72,6 @@ void main() {
         expect(heard!.words, isNotEmpty);
         expect(heard.words.every((w) => w.start >= 0 && w.end >= w.start && w.end <= seconds + 0.5), isTrue);
       }
-      final sw = Stopwatch()..start();
-      final voz = await ant.transcribeVoz(id);
-      debugPrint('PHONON Voz ${seconds}s: ${sw.elapsedMilliseconds} ms "${text(voz)}"');
       await ant.closeSession(id);
     }
   }, timeout: const Timeout(Duration(minutes: 10)));

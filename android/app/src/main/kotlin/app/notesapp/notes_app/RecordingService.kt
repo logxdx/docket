@@ -20,7 +20,7 @@ import android.os.PowerManager
  *    a backgrounded app silence, and a meeting recorded with the screen locked would come out
  *    blank after the first minute;
  *  - while the models clean and transcribe: type `dataSync`, or Android moves a backgrounded
- *    app onto its slow cores (and may stop it) halfway through Voz;
+ *    app onto its slow cores (and may stop it) halfway through a transcript;
  *
  * each with a partial wake lock, so the CPU keeps working with the screen off. The notification
  * says which ("Recording", "Transcribing on this phone") and opens the app. It goes when both end.

@@ -14,6 +14,7 @@ import '../../core/notes/notebook.dart';
 import '../../core/notes/search.dart';
 import '../settings/settings_screen.dart';
 import '../settings/settings_tiles.dart';
+import '../settings/models_screen.dart';
 import 'graph_screen.dart';
 import 'navigation.dart';
 import 'note_tools.dart';
@@ -516,6 +517,7 @@ class _NotesScreenState extends State<NotesScreen> {
                         ]),
                       ),
               ),
+              _ModelsNudge(services: _s),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                 child: TextField(
@@ -860,4 +862,73 @@ Future<String?> pickFolder(BuildContext context, Notebook book, {required String
       },
     ),
   );
+}
+
+/// The Desert Ant models, offered once while none is on the phone (the app no longer carries them): download
+/// them all, or not now (Settings › On-device models has them any time). While they come down, how far along.
+class _ModelsNudge extends StatefulWidget {
+  const _ModelsNudge({required this.services});
+
+  final Services services;
+
+  @override
+  State<_ModelsNudge> createState() => _ModelsNudgeState();
+}
+
+class _ModelsNudgeState extends State<_ModelsNudge> {
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.services;
+    final ant = s.ant;
+    final theme = Theme.of(context);
+    return ValueListenableBuilder(
+      valueListenable: ant.status,
+      builder: (context, status, _) => ValueListenableBuilder<Map<String, double>>(
+        valueListenable: ant.downloading,
+        builder: (context, downloading, _) {
+          if (downloading.isNotEmpty) {
+            final total = status.downloads.values.fold(0, (n, b) => n + b);
+            final done = status.downloads.entries.fold(0.0, (n, e) =>
+                n + (status.has(e.key) ? e.value : (downloading[e.key] ?? 0) * e.value));
+            final f = total == 0 ? 0.0 : done / total;
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Downloading on-device models: ${(f * 100).round()}%', style: theme.textTheme.bodySmall),
+                const SizedBox(height: 6),
+                LinearProgressIndicator(value: f, minHeight: 3),
+              ]),
+            );
+          }
+          final none = status.downloads.isNotEmpty && !status.downloads.keys.any(status.has);
+          if (!none || s.settings.get('models.nudged') == 'yes') return const SizedBox.shrink();
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Card(
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Titles, tags and Clean up', style: theme.textTheme.titleSmall),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Download the on-device models (${sizeLabel(status.missingBytes)}, once). They run on this phone; '
+                    'nothing you write is sent.',
+                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.4),
+                  ),
+                  Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                    TextButton(
+                      onPressed: () => setState(() => s.settings.set('models.nudged', 'yes')),
+                      child: const Text('Not now'),
+                    ),
+                    FilledButton.tonal(onPressed: () => downloadAll(context, ant), child: const Text('Download')),
+                  ]),
+                ]),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
 }

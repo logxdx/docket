@@ -5,8 +5,8 @@
 #   tool/release.sh v0.1.0             # build into build/release/v0.1.0
 #   tool/release.sh v0.1.0 --publish   # and create the GitHub release with its files
 #
-# A release holds: the arm64 APK with every model but Voz (all offline; under GitHub's 2 GiB per file),
-# the Voz pack (Settings › Transcript model › Import Voz), and their SHA-256 sums.
+# A release holds: the arm64 APK (carrying the Phonon models; the Desert Ant ones are downloaded in the app,
+# Settings › On-device models) and its SHA-256 sum.
 # Signing: DOCKET_KEYSTORE, DOCKET_KEYSTORE_PASSWORD, DOCKET_KEY_ALIAS, DOCKET_KEY_PASSWORD when set
 # (android/app/build.gradle.kts), else this machine's debug key.
 set -euo pipefail
@@ -43,20 +43,6 @@ size=$(stat -c %s "$apk")
 rm -rf "$out" && mkdir -p "$out"
 cp "$apk" "$out/docket-$version-arm64.apk"
 
-printf '\n== Voz pack\n'
-voz_rev=$(python3 -I -c "import json; print(json.load(open('.models/models/manifest.json'))['models']['voz']['revision'])")
-# Stored, not compressed (the weights do not compress), with Python's zipfile: no zip tool needed.
-python3 -I - "$out/docket-voz-$voz_rev.zip" .models/models/voz <<'PY'
-import os, sys, zipfile
-target, folder = sys.argv[1], sys.argv[2]
-with zipfile.ZipFile(target, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
-    for name in sorted(os.listdir(folder)):
-        path = os.path.join(folder, name)
-        if os.path.isfile(path) and not name.startswith("."):
-            z.write(path, name)
-print(f"{target}: {os.path.getsize(target) / 1e6:.0f} MB")
-PY
-
 (cd "$out" && sha256sum -- * > SHA256SUMS)
 ls -la "$out"
 
@@ -66,11 +52,11 @@ if [ "$publish" = "--publish" ]; then
   cat > "$notes" <<NOTES
 Docket $version for Android (arm64).
 
-- **docket-$version-arm64.apk**: the app, with its on-device models (Clear, Ear, Phonon-2.5 and its
-  English model, Who, Align, Title, Gist, Emo, and the Phonon voice). Works with no network.
-- **docket-voz-$voz_rev.zip** (optional): Desert Ant's Voz recognizer. Import it in
-  Settings › Transcript model › Import Voz; every file is checked before it is kept.
-- **SHA256SUMS**: checksums of both.
+- **docket-$version-arm64.apk**: the app, with Phonon-2.5 (and its English model) for transcripts and
+  the Phonon voice for reading aloud. The Desert Ant models (Title, Gist, Ear, Clear, Who, Align) are
+  downloaded in the app from Hugging Face when wanted (Settings › On-device models), every file checked;
+  everything runs on the phone.
+- **SHA256SUMS**: its checksum.
 NOTES
   # The tag: made here when it is not there yet (a local run), never moved or forced.
   if git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
@@ -82,5 +68,5 @@ NOTES
   if [ -z "${CI:-}" ]; then git push origin "HEAD:refs/heads/$(git rev-parse --abbrev-ref HEAD)"; fi
   git push origin "refs/tags/$version"
   gh release create "$version" --title "Docket $version" --notes-file "$notes" \
-    "$out/docket-$version-arm64.apk" "$out/docket-voz-$voz_rev.zip" "$out/SHA256SUMS"
+    "$out/docket-$version-arm64.apk" "$out/SHA256SUMS"
 fi

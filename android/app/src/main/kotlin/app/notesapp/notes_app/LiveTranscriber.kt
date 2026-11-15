@@ -8,10 +8,10 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Words while they are said, for the record screen: Desert Ant's Voz live session, which the
- * SDK ships for Apple only (Sources/Voz/Live.swift, `LiveTranscriber`), ported rule for rule.
+ * Words while they are said, for the record screen: Desert Ant's live session (Sources/Voz/Live.swift,
+ * `LiveTranscriber`, Apple only), ported rule for rule and run on Phonon-2.5.
  *
- * Voz reads a fixed 15 s window, so it cannot decode a frame at a time; instead the audio not
+ * The recognizer reads a fixed 15 s window, so it cannot decode a frame at a time; instead the audio not
  * yet settled is transcribed again on every pass, and its words shown as tentative. A word two
  * passes in a row agree on (same text, same place, give or take [agreementTolerance]) is
  * settled: more context did not change it, so it will not change. Once the held audio passes
@@ -24,7 +24,7 @@ import kotlin.math.min
  */
 class LiveTranscriber(
     private val scope: CoroutineScope,
-    /** One Voz pass over 16 kHz samples: words with times relative to them; null when it could not run now. */
+    /** One recognizer pass over 16 kHz samples: words with times relative to them; null when it could not run now. */
     private val transcribe: suspend (FloatArray) -> List<Word>?,
     /** Settled words, then tentative ones, after every pass (on the pass's thread). */
     private val onUpdate: (settled: List<Word>, tentative: List<Word>) -> Unit,

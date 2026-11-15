@@ -46,7 +46,7 @@ class _RecordScreenState extends State<RecordScreen> {
   Duration _length = Duration.zero;
   bool _started = false;
 
-  /// Whether words are shown as they are said (Settings › Live transcription, and Voz on the phone).
+  /// Whether words are shown as they are said (Settings › Live transcription, and Phonon on the phone).
   bool _live = false;
   bool _holding = false;
   bool _saving = false;
@@ -84,8 +84,8 @@ class _RecordScreenState extends State<RecordScreen> {
       setState(() => _problem = 'Recording needs the microphone: allow it in the phone\'s settings for Docket.');
       return;
     }
-    _live = _services.autoEnabled('live') && (_ant.status.value.phonon || _ant.status.value.has('voz'));
-    // Earlier recordings wait: the live words need Voz and the CPU.
+    _live = _services.autoEnabled('live') && _ant.status.value.phonon;
+    // Earlier recordings wait: the live words need Phonon and the CPU.
     _services.recordings.holdWhileRecording(true);
     try {
       final state = await _ant.startRecording(_services.recordings.rawPathFor(_id), live: _live);

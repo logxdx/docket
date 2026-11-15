@@ -4,8 +4,8 @@ import 'package:notes_app/core/voice/spoken.dart';
 void main() {
   group('which recognizer hears a recording', () {
     test('a Voz language goes to Voz, sure or not', () {
-      expect(routeFor([('de', 0.9)], reliable: true), [(engine: Engine.voz, language: 'de')]);
-      expect(routeFor([('es', 0.45), ('pt', 0.40)], reliable: false), [(engine: Engine.voz, language: 'es')]);
+      expect(routeFor([('de', 0.9)], reliable: true), [(engine: Engine.phonon, language: 'de')]);
+      expect(routeFor([('es', 0.45), ('pt', 0.40)], reliable: false), [(engine: Engine.phonon, language: 'es')]);
     });
 
     test('another language, named surely, goes only to the phone\'s recognizer', () {
@@ -15,30 +15,19 @@ void main() {
 
     test('unsure, with a Voz language second: the phone first, then Voz', () {
       expect(routeFor([('hi', 0.40), ('en', 0.35)], reliable: false),
-          [(engine: Engine.device, language: 'hi'), (engine: Engine.voz, language: 'en')]);
+          [(engine: Engine.device, language: 'hi'), (engine: Engine.phonon, language: 'en')]);
       expect(routeFor([('hi', 0.40), ('ur', 0.35)], reliable: false), [(engine: Engine.device, language: 'hi')]);
     });
 
     test('Norwegian (never reliable, not in Voz): the phone, then Voz', () {
       expect(routeFor([('nb', 0.8), ('da', 0.1)], reliable: false),
-          [(engine: Engine.device, language: 'no'), (engine: Engine.voz, language: 'da')]);
+          [(engine: Engine.device, language: 'no'), (engine: Engine.phonon, language: 'da')]);
       // Swedish and Danish are Voz's own.
-      expect(routeFor([('sv', 0.8), ('no', 0.1)], reliable: false), [(engine: Engine.voz, language: 'sv')]);
+      expect(routeFor([('sv', 0.8), ('no', 0.1)], reliable: false), [(engine: Engine.phonon, language: 'sv')]);
     });
 
-    test('nothing heard: Voz', () {
-      expect(routeFor([], reliable: false), [(engine: Engine.voz, language: '')]);
-    });
-
-    test('Phonon preferred: it hears Voz\'s languages first, Voz right after; others unchanged', () {
-      expect(routeFor([('en', 0.9)], reliable: true, prefer: Engine.phonon),
-          [(engine: Engine.phonon, language: 'en'), (engine: Engine.voz, language: 'en')]);
-      expect(routeFor([('hi', 0.4), ('en', 0.35)], reliable: false, prefer: Engine.phonon), [
-        (engine: Engine.device, language: 'hi'),
-        (engine: Engine.phonon, language: 'en'),
-        (engine: Engine.voz, language: 'en'),
-      ]);
-      expect(routeFor([('ja', 0.97)], reliable: true, prefer: Engine.phonon), [(engine: Engine.device, language: 'ja')]);
+    test('nothing heard: Phonon', () {
+      expect(routeFor([], reliable: false), [(engine: Engine.phonon, language: '')]);
     });
   });
 
@@ -92,7 +81,7 @@ void main() {
     const s = SpokenWords(
       words: [TimedWord('Hola', 0.08, 0.4, 0)],
       language: 'es',
-      engine: Engine.voz,
+      engine: Engine.phonon,
       duration: 1.25,
       speakers: 1,
       aligned: true,

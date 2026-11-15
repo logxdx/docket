@@ -34,7 +34,7 @@ flutter build apk --debug
   1. the audio is kept beside the note as recorded (`.m4a`);
   2. **Ear** names the language, and the right recognizer hears it
      (`routeFor` in `lib/core/voice/spoken.dart`): Fermion Research's
-     **Phonon-2.5** (or **Voz**) for their 25 European languages, else the
+     **Phonon-2.5** for its 25 European languages, else the
      phone's own *on-device* recognizer (Android 13+, word times from 14),
      never a model that would return confident nonsense;
   3. the transcript goes in the note as plain, editable Markdown, the word
@@ -70,18 +70,25 @@ flutter build apk --debug
   jobs, and lost to Title and Gist on titles and tags
   (`tool/language_models.md`).
 
-## Offline, on the phone
-Every model runs on the phone and the app needs no network. The models come
-in the APK: `python3 -I tool/fetch_models.py` downloads each one's Android
-files, pinned to the revision its SDK release (4.3.0) declares and checked
-against the Hub's SHA-256, into `.models/` (gitignored), which Gradle packs
-as uncompressed assets. The first launch after an install copies them into
-the app's folder (`OfflineModels.kt`) and each SDK is pointed at its folder,
-which it then uses with no network.
+## On the phone
+Every model runs on the phone. `python3 -I tool/fetch_models.py` fetches each
+one's Android files, pinned to the revision its SDK release (4.3.0) declares
+and checked against the Hub's SHA-256, into `.models/` (gitignored), and
+`tool/stage_models.py` splits them:
+- **In the APK**: Phonon-2.5 and its English model (transcripts) and the
+  Phonon voice (reading aloud), packed as uncompressed assets and copied
+  into the app's folder on the first launch after an install
+  (`OfflineModels.kt`).
+- **Downloaded in the app**: the Desert Ant models (Title, Gist, Ear, Clear,
+  Who, Align, about 450 MB), left out to keep the APK small. Settings ›
+  On-device models (and a card on the notes list until they are there)
+  fetches each from Hugging Face at its pinned revision, keeps a file only
+  when its size and sha256 match, and goes on where a stopped download left
+  off. Without them notes are still written and transcribed; titles, tags
+  and Clean up wait for them.
 
-That costs space: 1.73 GB of models (Voz alone is 1.24 GB), copied once, and
-each model's native library is about 56 MB. Docket is built for arm64-v8a
-phones only (no x86_64, so no emulator):
+Each SDK is then pointed at its model's folder and uses it with no network.
+Docket is built for arm64-v8a phones only (no x86_64, so no emulator):
 `flutter build apk --release --split-per-abi --target-platform android-arm64`.
 
 The SDKs report an anonymous usage count to Desert Ant when a network
@@ -100,14 +107,13 @@ and `tool/release.sh` run it; it rebuilds only when the patches change.
 
 **Phonon**, also on the phone and offline:
 - *Speech recognition*: Fermion Research's Phonon-2.5 (25 languages) and
-  Phonon-2.5 English, Parakeet-TDT derived like Voz but several times faster
-  on a phone (6 s of speech in ~0.45 s on a Snapdragon 888, Voz ~2.1 s). It
-  writes the **live words** while recording (refreshing every second; Desert
-  Ant's Swift live session ported to `LiveTranscriber.kt`), and the saved
-  transcript when Settings › Saved transcript is Phonon (Voz is the default).
+  Phonon-2.5 English, Parakeet-TDT derived and fast on a phone (6 s of speech
+  in ~0.45 s on a Snapdragon 888). It writes the **live words** while
+  recording (refreshing every second; Desert Ant's Swift live session ported
+  to `LiveTranscriber.kt`) and the saved transcript.
   Glue: `android/app/src/main/cpp/phonon_asr.c` (word timings added),
   `tool/build_asr.sh`, Fermion's Apache-2.0 engine in `jniLibs/arm64-v8a`
-  (arm64 only; elsewhere Voz does it). Weights CC BY 4.0.
+  (arm64 only). Weights CC BY 4.0.
 - *Reading aloud*: Gradium's Phonon 31M voice (English, 25 voices; Apache-2.0)
   through `libptts_ffi.so` and a JNI shim (`cpp/ptts_jni.c`,
   `tool/build_ptts_jni.sh`): a note's speaker button reads it sentence by
@@ -126,9 +132,10 @@ own code on a device or emulator (see its header).
 - `tool/ci.sh`: analysis, Dart tests, Kotlin tests and a debug APK. The
   GitHub workflow `.github/workflows/ci.yml` runs exactly this.
 - `tool/release.sh vX.Y.Z [--publish]`: fetches and checks the models
-  (`tool/fetch_models.py`), stages all but Voz (`tool/stage_models.py`),
-  builds the arm64 APK (refusing one without the app's code or over GitHub's
-  2 GiB per file), packs Voz, writes `SHA256SUMS`, and with `--publish`
+  (`tool/fetch_models.py`), stages the Phonon models into the APK and lists
+  the Desert Ant ones as downloads (`tool/stage_models.py`), builds the arm64
+  APK (refusing one without the app's code or over GitHub's 2 GiB per file),
+  writes `SHA256SUMS`, and with `--publish`
   tags and creates the GitHub release. `.github/workflows/release.yml` runs
   it on a `v*` tag. Both workflows are disabled on GitHub while Actions
   minutes are out (`gh workflow enable CI` / `Release` to turn them back on);
@@ -137,10 +144,6 @@ own code on a device or emulator (see its header).
   `DOCKET_KEY_PASSWORD` when set (CI secrets: `DOCKET_KEYSTORE_BASE64` and the
   rest), else the debug key. Moving to a real key changes the signature, so
   installed copies must be uninstalled once.
-- **Voz** is not in the APK (it would pass GitHub's limit): Settings ›
-  Transcript model › Import Voz takes the release's `docket-voz-*.zip` (or its
-  six files), each checked against its pinned size and sha256. Phonon writes
-  transcripts until then.
 - **Custom voices**: Settings › Voice › Custom voices › + adds any Phonon voice
   file (`.safetensors`, `speaker_wavs` [1, 512, n]) after checking it.
 

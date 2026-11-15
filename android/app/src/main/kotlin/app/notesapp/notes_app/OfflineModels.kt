@@ -4,19 +4,23 @@ import android.content.Context
 import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.security.MessageDigest
 
 /**
- * The Desert Ant models, on this phone with no network: the APK carries them as assets
- * (assets/models/<id>/..., put there by tool/fetch_models.py), and the first launch after an
- * install or update copies them to the app's own folder, because the SDKs open real files.
- * A build without them (NOTES_BUNDLE_MODELS=0) takes the same folder pushed over USB instead
+ * The on-device models. Two kinds, as the APK's manifest lists them:
+ *  - "models": carried by the APK as assets (assets/models/<id>/..., Phonon's: put there by
+ *    tool/stage_models.py), copied to the app's own folder on the first launch after an install or
+ *    update, because the runtimes open real files;
+ *  - "downloads": the Desert Ant models, left out to keep the APK small, fetched from Hugging Face
+ *    when the user asks (Settings › On-device models): each file from its pinned revision, kept only
+ *    when its size and sha256 are the pinned ones.
+ * A build without models (NOTES_BUNDLE_MODELS=0) takes the folder pushed over USB instead
  * (tool/push_models.sh), described by the manifest.json pushed with it.
- * A model's folder is then handed to its SDK as `directory`; a folder the SDK finds already
- * filled (and without its own download bookkeeping) is used as-is, with no network.
- *
- * A model that is not in the APK is reported missing and never constructed, so no SDK is
- * ever asked to download.
+ * A model's folder is handed to its SDK as `directory`; a folder the SDK finds already filled (and
+ * without its own download bookkeeping) is used as-is. A model not in place is reported missing and
+ * never constructed, so no SDK ever downloads on its own.
  */
 class OfflineModels(private val context: Context) {
     private val root = File(context.filesDir, "models")
@@ -45,79 +49,105 @@ class OfflineModels(private val context: Context) {
         return models.keys().asSequence().toList()
     }
 
-    /** Models the APK leaves out but the user can import (Voz), with their files pinned. */
-    fun importableIds(): List<String> {
-        val models = bundled?.optJSONObject("importable") ?: return emptyList()
+    /** The models the APK leaves out, to download (the Desert Ant ones), with their files pinned. */
+    fun downloadIds(): List<String> {
+        val models = bundled?.optJSONObject("downloads") ?: return emptyList()
         return models.keys().asSequence().toList()
     }
 
+    /** How many bytes [id] takes, all its files together. */
+    fun sizeOf(id: String): Long = filesOf(id)?.sumOf { it.second } ?: 0L
+
+    /** Cancelled downloads, by id: the download stops at its next block. */
+    private val cancelled = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    fun cancel(id: String) {
+        cancelled += id
+    }
+
     /**
-     * Import [id] (an importable model) from [sources]: each a file name and a way to open it, as the user picked
-     * them (the model's files, or a .zip holding them, unpacked by the caller). A file is kept only when its size
-     * and sha256 are the pinned ones; the model is ready only when all its files are. [progress] gets bytes done
-     * and the total. Throws with what is missing or wrong; then nothing of it is kept.
+     * Download [id] (one of [downloadIds]) from Hugging Face: each file from the revision the manifest pins
+     * (https://huggingface.co/<repo>/resolve/<revision>/<path>), kept only when its size and sha256 are the pinned
+     * ones. Files already in place are kept, so a download stopped halfway goes on where it was. [progress] gets
+     * bytes done and the total. Throws with what went wrong; the model is then not ready (its finished files stay).
      */
-    @Synchronized
-    fun import(id: String, sources: Sequence<Pair<String, () -> InputStream>>, progress: (Long, Long) -> Unit) {
-        val model = bundled?.optJSONObject("importable")?.optJSONObject(id)
-            ?: throw IllegalArgumentException("$id cannot be imported")
+    fun download(id: String, progress: (Long, Long) -> Unit) {
+        val model = bundled?.optJSONObject("downloads")?.optJSONObject(id)
+            ?: throw IllegalArgumentException("$id is not a model to download")
+        val repo = model.getString("repo")
+        val revision = model.getString("revision")
         val files = model.getJSONArray("files")
-        val wanted = (0 until files.length()).associate {
+        val specs = (0 until files.length()).map {
             val f = files.getJSONObject(it)
             // A JSON null (no checksum pinned) is no checksum, not the text "null".
-            val sha = if (f.isNull("sha256")) "" else f.optString("sha256")
-            f.getString("path").substringAfterLast('/') to Triple(f.getString("path"), f.getLong("size"), sha)
+            Triple(f.getString("path"), f.getLong("size"), if (f.isNull("sha256")) "" else f.optString("sha256"))
         }
-        val total = wanted.values.sumOf { it.second }
+        val total = specs.sumOf { it.second }
         val dir = File(root, id)
-        val done = HashSet<String>()
-        var copied = 0L
-        try {
-            for ((name, open) in sources) {
-                val spec = wanted[name.substringAfterLast('/')] ?: continue
-                if (spec.first in done) continue
-                val target = File(dir, spec.first)
-                target.parentFile?.mkdirs()
-                val part = File(target.path + ".part")
-                val digest = MessageDigest.getInstance("SHA-256")
-                var size = 0L
-                open().use { input ->
+        var done = 0L
+        cancelled -= id
+        for ((path, size, sha256) in specs) {
+            val target = File(dir, path)
+            if (target.length() == size) {
+                done += size
+                progress(done, total)
+                continue
+            }
+            target.parentFile?.mkdirs()
+            val part = File(target.path + ".part")
+            val digest = MessageDigest.getInstance("SHA-256")
+            var got = 0L
+            val connection = URL("https://huggingface.co/$repo/resolve/$revision/$path").openConnection() as HttpURLConnection
+            connection.connectTimeout = 20_000
+            connection.readTimeout = 60_000
+            connection.instanceFollowRedirects = true
+            try {
+                if (connection.responseCode !in 200..299) {
+                    throw IllegalStateException("Hugging Face answered ${connection.responseCode} for $id/$path.")
+                }
+                connection.inputStream.use { input ->
                     part.outputStream().use { out ->
                         val buf = ByteArray(1 shl 20)
                         while (true) {
+                            if (id in cancelled) throw InterruptedException("Download stopped.")
                             val n = input.read(buf)
                             if (n < 0) break
                             out.write(buf, 0, n)
                             digest.update(buf, 0, n)
-                            size += n
-                            copied += n
-                            progress(copied, total)
-                            if (size > spec.second) break
+                            got += n
+                            progress(done + got, total)
+                            if (got > size) break
                         }
                     }
                 }
-                val sha = digest.digest().joinToString("") { "%02x".format(it) }
-                if (size != spec.second || (spec.third.isNotEmpty() && sha != spec.third)) {
-                    part.delete()
-                    throw IllegalArgumentException("${spec.first} is not the right file (size or checksum differs).")
-                }
-                if (!part.renameTo(target)) throw IllegalStateException("could not place ${spec.first}")
-                done += spec.first
+            } catch (e: Exception) {
+                part.delete()
+                throw e
+            } finally {
+                connection.disconnect()
             }
-            val missing = wanted.values.map { it.first }.filter { it !in done && File(dir, it).length() != wanted[it.substringAfterLast('/')]!!.second }
-            if (missing.isNotEmpty()) throw IllegalArgumentException("Missing: ${missing.joinToString(", ")}.")
-        } catch (e: Exception) {
-            dir.deleteRecursively()
-            throw e
+            val sha = digest.digest().joinToString("") { "%02x".format(it) }
+            if (got != size || (sha256.isNotEmpty() && sha != sha256)) {
+                part.delete()
+                throw IllegalStateException("$id/$path did not come down whole (size or checksum differs). Try again.")
+            }
+            if (!part.renameTo(target)) throw IllegalStateException("could not place $id/$path")
+            done += size
         }
         File(dir, ".dal-meta").deleteRecursively()
     }
 
-    /** Whether [id]'s files are in place in the app's folder (copied from the APK, imported, or pushed). */
+    /** Take [id] (a downloaded model) off the phone. */
+    @Synchronized
+    fun remove(id: String) {
+        if (id in downloadIds()) File(root, id).deleteRecursively()
+    }
+
+    /** Whether [id]'s files are in place in the app's folder (copied from the APK, downloaded, or pushed). */
     @Synchronized
     fun isReady(id: String): Boolean {
-        val imported = id in importableIds()
-        if (inApk != null && !stamp.exists() && !imported) return false // still being copied out of the APK
+        val downloaded = id in downloadIds()
+        if (inApk != null && !stamp.exists() && !downloaded) return false // still being copied out of the APK
         return filesPresent(id) && !File(root, "$id/.dal-meta").exists()
     }
 
@@ -166,10 +196,10 @@ class OfflineModels(private val context: Context) {
             // SDK treat the folder as download-managed rather than as files we placed.
             File(dir, ".dal-meta").deleteRecursively()
         }
-        // Models dropped from this build: their folders go (not those the user imported, nor their voices).
-        val importable = manifest.optJSONObject("importable")
+        // Models dropped from this build: their folders go (not those downloaded, which the APK no longer carries).
+        val downloads = manifest.optJSONObject("downloads")
         root.listFiles()
-            ?.filter { it.isDirectory && !models.has(it.name) && importable?.has(it.name) != true }
+            ?.filter { it.isDirectory && !models.has(it.name) && downloads?.has(it.name) != true }
             ?.forEach { it.deleteRecursively() }
         stamp.writeText(text)
     }
@@ -181,7 +211,7 @@ class OfflineModels(private val context: Context) {
 
     private fun filesOf(id: String): List<Pair<String, Long>>? {
         val model = bundled?.optJSONObject("models")?.optJSONObject(id)
-            ?: bundled?.optJSONObject("importable")?.optJSONObject(id) ?: return null
+            ?: bundled?.optJSONObject("downloads")?.optJSONObject(id) ?: return null
         val files = model.getJSONArray("files")
         return (0 until files.length()).map {
             val f = files.getJSONObject(it)

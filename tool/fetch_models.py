@@ -37,9 +37,6 @@ MODELS = {
     "clear": ("desert-ant-labs/clear", "v0.3.0", ["clear-studio.tflite"]),
     # Spoken language identification.
     "ear": ("desert-ant-labs/ear", "v0.2.0", ["ear.tflite", "languages.json", "ear_meta.json", "mel_filters.f32"]),
-    # Speech recognition with word timestamps (LiteRT export).
-    "voz": ("desert-ant-labs/voz", "v0.5.0",
-            ["encoder.tflite", "mel.tflite", "decoder.tflite", "meta.litert.json", "vocab.json", "embedding.f16"]),
     # Speaker labeling: off Apple only the int8 LiteRT precision is published.
     "who": ("desert-ant-labs/who", "v0.3.4",
             [f"litert-int8/{f}" for f in

@@ -243,7 +243,7 @@ class _SpokenTranscriptState extends State<SpokenTranscript> with SingleTickerPr
     final w = _words;
     final about = [
       if (w != null && w.language.isNotEmpty) languageName(w.language),
-      if (w != null) switch (w.engine) { Engine.voz => 'Voz', Engine.phonon => 'Phonon', Engine.device => 'phone recognizer' },
+      if (w != null) switch (w.engine) { Engine.phonon => 'Phonon', Engine.device => 'phone recognizer' },
       if (w != null && w.speakers > 1) '${w.speakers} speakers',
       if (w != null && w.aligned) 'times refined by Align',
       if (timed && widget.playback != null) 'tap a word to play from it',
@@ -416,7 +416,7 @@ class _CleanUpSheetState extends State<_CleanUpSheet> {
             ListTile(
               dense: true,
               title: Text(languageName(code)),
-              subtitle: Text(vozLanguages.contains(code) ? 'Phonon' : 'Phone recognizer'),
+              subtitle: Text(phononLanguages.contains(code) ? 'Phonon' : 'Phone recognizer'),
               trailing: code == _language ? const Icon(Icons.check_rounded) : null,
               onTap: () => Navigator.pop(context, code),
             ),

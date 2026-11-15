@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Stage the models the APK carries: .models-bundle/models/<id>/..., hard links into .models/ (no
-extra disk), and a manifest.json listing them under "models". Models left out (Voz by default: at
-1.24 GB it would take a full APK over GitHub's 2 GiB release limit, and Phonon-2.5 does the same
-job) are listed under "importable", with each file's size and sha256, so the app can verify a copy
-the user imports (Settings › Transcript model › Import Voz) without any network.
+extra disk), and a manifest.json the app reads. Two lists:
 
-    python3 -I tool/stage_models.py            # every model but Voz
-    python3 -I tool/stage_models.py --without voz,who
+- "models": carried by the APK (Fermion Research's Phonon models: the recognizer and the voice);
+- "downloads": the Desert Ant models, left out to keep the APK small; the app fetches them from
+  Hugging Face when the user asks (Settings › On-device models), each file from the revision pinned
+  here and kept only when its size and sha256 match.
+
+    python3 -I tool/stage_models.py                 # Desert Ant models as downloads
+    python3 -I tool/stage_models.py --bundle title  # carry Title in the APK too
 """
 import json
 import os
@@ -17,17 +19,18 @@ here = os.path.dirname(os.path.abspath(__file__))
 src = os.path.join(here, "..", ".models", "models")
 dst = os.path.join(here, "..", ".models-bundle", "models")
 
-without = {"voz"}
-if "--without" in sys.argv:
-    without = {m for m in sys.argv[sys.argv.index("--without") + 1].split(",") if m}
+bundle = set()
+if "--bundle" in sys.argv:
+    bundle = {m for m in sys.argv[sys.argv.index("--bundle") + 1].split(",") if m}
 
 manifest = json.load(open(os.path.join(src, "manifest.json")))
 shutil.rmtree(dst, ignore_errors=True)
 os.makedirs(dst)
-kept, importable, total = {}, {}, 0
+kept, downloads, total, later = {}, {}, 0, 0
 for model_id, model in manifest["models"].items():
-    if model_id in without:
-        importable[model_id] = model
+    if model["repo"].startswith("desert-ant-labs/") and model_id not in bundle:
+        downloads[model_id] = model
+        later += sum(f["size"] for f in model["files"])
         continue
     for f in model["files"]:
         target = os.path.join(dst, model_id, f["path"])
@@ -36,5 +39,6 @@ for model_id, model in manifest["models"].items():
         total += f["size"]
     kept[model_id] = model
 with open(os.path.join(dst, "manifest.json"), "w") as out:
-    json.dump({"sdk": manifest.get("sdk"), "models": kept, "importable": importable}, out, indent=1)
-print(f"bundled {len(kept)} models, {total / 1e6:.0f} MB; importable: {', '.join(importable) or 'none'}")
+    json.dump({"sdk": manifest.get("sdk"), "models": kept, "downloads": downloads}, out, indent=1)
+print(f"bundled {len(kept)} models, {total / 1e6:.0f} MB; "
+      f"to download in the app: {', '.join(downloads) or 'none'} ({later / 1e6:.0f} MB)")

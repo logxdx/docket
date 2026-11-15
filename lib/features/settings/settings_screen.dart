@@ -1,7 +1,7 @@
-/// Settings, as drawn (Docket Settings redesign): five short groups, one line
-/// per setting with its value on the right, and the details one tap away: the
-/// transcript model and the reading voice in sheets, AI and the credits on
-/// pages of their own.
+/// Settings, as drawn (Docket Settings redesign): short groups, one line per
+/// setting with its value on the right, and the details one tap away: the
+/// reading voice in a sheet, the on-device models, AI and the credits on pages
+/// of their own.
 library;
 
 import 'dart:async';
@@ -15,7 +15,7 @@ import '../../app/theme.dart';
 import '../../core/ai/model.dart';
 import '../../core/ai/prompts.dart';
 import '../../core/notes/read_aloud.dart' show readingVoiceRegions;
-import '../../core/voice/spoken.dart' show Engine;
+import 'models_screen.dart';
 
 part 'ai_screen.dart';
 
@@ -48,9 +48,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
           builder: (context, _) => ListView(padding: const EdgeInsets.only(bottom: 24), children: [
             _Group('Recording', [
               _Switch('Live transcription', _s.autoEnabled('live'), (on) => setState(() => _s.setAutoEnabled('live', on))),
-              _Row('Transcript model', value: _s.transcriber == Engine.phonon ? 'Phonon' : 'Voz', onTap: _pickTranscriber),
             ]),
             _Group('Smart notes', [
+              _Row(
+                'On-device models',
+                value: status.downloads.isEmpty
+                    ? 'In the app'
+                    : status.missingBytes == 0
+                        ? 'All on this phone'
+                        : status.downloads.keys.any(status.has)
+                            ? '${status.downloads.keys.where(status.has).length} of ${status.downloads.length}'
+                            : 'Not downloaded',
+                onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const ModelsScreen())),
+              ),
               _Switch('Title new notes', _s.autoEnabled('title'), (on) => setState(() => _s.setAutoEnabled('title', on))),
               _Switch('Tag topics', _s.autoEnabled('tags'), (on) => setState(() => _s.setAutoEnabled('tags', on))),
             ]),
@@ -87,7 +97,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Text(
                   _s.modelUrl.isNotEmpty
                       ? 'Summaries and Tidy up go to your model server. Everything else runs on this phone.'
-                      : 'Everything runs on this phone. Nothing is sent anywhere.',
+                      : 'Everything runs on this phone. Nothing is sent anywhere; models come from Hugging Face once, '
+                          'when you download them.',
                   style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.45)),
             ),
           ]),
@@ -157,15 +168,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     for (final c in controllers) {
       c.dispose();
     }
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _pickTranscriber() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (_) => _TranscriberSheet(services: _s),
-    );
     if (mounted) setState(() {});
   }
 
@@ -397,165 +399,6 @@ class _AccentDots extends StatelessWidget {
           ),
         ],
       ]),
-    );
-  }
-}
-
-/// Voz or Phonon for the saved transcript; one line each.
-class _TranscriberSheet extends StatefulWidget {
-  const _TranscriberSheet({required this.services});
-
-  final Services services;
-
-  @override
-  State<_TranscriberSheet> createState() => _TranscriberSheetState();
-}
-
-class _TranscriberSheetState extends State<_TranscriberSheet> {
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final muted = theme.colorScheme.onSurfaceVariant;
-    final s = widget.services;
-    final phonon = s.ant.status.value.phonon;
-    Widget option(Engine engine, String name, String line, {bool enabled = true}) {
-      final on = s.transcriber == engine;
-      final accent = Accent.of(context);
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: Material(
-          color: on ? accent.withValues(alpha: 0.10) : Colors.transparent,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: on ? accent : theme.colorScheme.outlineVariant),
-          ),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(16),
-            onTap: enabled
-                ? () {
-                    setState(() => s.transcriber = engine);
-                    Navigator.pop(context);
-                  }
-                : null,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Icon(on ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded, color: on ? accent : muted),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(name, style: theme.textTheme.titleMedium?.copyWith(color: enabled ? null : muted)),
-                    const SizedBox(height: 4),
-                    Text(line, style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.4)),
-                  ]),
-                ),
-              ]),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Transcript model', style: theme.textTheme.titleLarge),
-          const SizedBox(height: 4),
-          Text('Writes a recording\'s transcript after you save it.',
-              style: theme.textTheme.bodyMedium?.copyWith(color: muted)),
-          const SizedBox(height: 14),
-          if (s.ant.status.value.has('voz'))
-            option(Engine.voz, 'Voz', 'Desert Ant\'s model. Steady and thorough.')
-          else
-            _ImportVoz(services: s, onDone: () => setState(() => s.transcriber = Engine.voz)),
-          option(Engine.phonon, 'Phonon',
-              phonon ? 'About 4× faster on this phone. Same 25 languages.' : 'Not on this phone.', enabled: phonon),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(2, 4, 2, 0),
-            child: Text(
-              'Other languages always go to the phone\'s own offline recognizer.${phonon ? ' Live words use Phonon.' : ''}',
-              style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.45),
-            ),
-          ),
-        ]),
-      ),
-    );
-  }
-}
-
-/// Voz is not in the APK (it would take it over GitHub's release limit): its card offers to import it, from
-/// the release's Voz pack (.zip) or its six files, each checked before it is kept.
-class _ImportVoz extends StatefulWidget {
-  const _ImportVoz({required this.services, required this.onDone});
-
-  final Services services;
-  final VoidCallback onDone;
-
-  @override
-  State<_ImportVoz> createState() => _ImportVozState();
-}
-
-class _ImportVozState extends State<_ImportVoz> {
-  String _problem = '';
-
-  Future<void> _import() async {
-    final ant = widget.services.ant;
-    setState(() => _problem = '');
-    final uris = await ant.pickFiles();
-    if (uris == null || uris.isEmpty || !mounted) return;
-    try {
-      await ant.importModel('voz', uris);
-      widget.onDone();
-    } on PlatformException catch (e) {
-      if (mounted) setState(() => _problem = e.message ?? 'Voz could not be imported.');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final muted = theme.colorScheme.onSurfaceVariant;
-    final importable = widget.services.ant.status.value.importable.contains('voz');
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: theme.colorScheme.outlineVariant),
-        ),
-        child: ValueListenableBuilder<double?>(
-          valueListenable: widget.services.ant.importing,
-          builder: (context, progress, _) => Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Icon(Icons.radio_button_off_rounded, color: muted.withValues(alpha: 0.5)),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Voz', style: theme.textTheme.titleMedium?.copyWith(color: muted)),
-                const SizedBox(height: 4),
-                Text(
-                  progress != null
-                      ? 'Importing Voz… ${(progress * 100).round()}%'
-                      : 'Not on this phone. Import the Voz pack (.zip) from Docket\'s release, or its six files.',
-                  style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.4),
-                ),
-                if (progress != null) ...[
-                  const SizedBox(height: 8),
-                  LinearProgressIndicator(value: progress, minHeight: 3),
-                ] else if (importable)
-                  TextButton(
-                    style: TextButton.styleFrom(padding: EdgeInsets.zero, foregroundColor: Accent.of(context)),
-                    onPressed: _import,
-                    child: const Text('Import Voz…'),
-                  ),
-                if (_problem.isNotEmpty)
-                  Text(_problem, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error, height: 1.4)),
-              ]),
-            ),
-          ]),
-        ),
-      ),
     );
   }
 }
@@ -851,7 +694,7 @@ class _AboutScreen extends StatelessWidget {
               style: theme.textTheme.bodySmall?.copyWith(color: muted)),
         ),
         _Group('On-device AI', [
-          credit('Desert Ant Labs', 'Clear, Ear, Voz, Who, Align, Title, Gist', 'https://desertant.com'),
+          credit('Desert Ant Labs', 'Clear, Ear, Who, Align, Title, Gist', 'https://desertant.com'),
           credit('Fermion Research · Phonon-2.5', 'CC BY 4.0, from NVIDIA Parakeet-TDT',
               'https://huggingface.co/FermionResearch/Phonon-2.5'),
           credit('Gradium · Phonon voice', 'Apache-2.0', 'https://huggingface.co/gradium/phonon-31m-en'),

@@ -37,10 +37,14 @@ void main() {
     work.createSync(recursive: true);
   });
 
-  testWidgets('the bundled models are put in place', (tester) async {
-    final status = await ant.prepare();
+  testWidgets('the models are in place (downloaded first, when the build leaves them out)', (tester) async {
+    var status = await ant.prepare();
+    for (final id in status.downloads.keys) {
+      if (!status.has(id)) await ant.download(id);
+    }
+    status = ant.status.value;
     debugPrint('MODELS bundled=${status.bundled} ready=${status.ready} align=${status.align} title=${status.title}');
-    expect(status.ready, containsAll(['clear', 'ear', 'voz', 'who', 'gist', 'emo', 'align', 'title']));
+    expect(status.ready, containsAll(['clear', 'ear', 'who', 'gist', 'align', 'title', 'phonon-p25']));
     expect(status.align, isTrue);
     expect(status.title, isTrue);
   }, timeout: const Timeout(Duration(minutes: 15)));
@@ -51,7 +55,7 @@ void main() {
 
     final sw = Stopwatch()..start();
     String ms() { final t = sw.elapsedMilliseconds; sw..reset()..start(); return '${t}ms'; }
-    final prepared = await ant.prepareSession('t1', wav.path, out: out);
+    final prepared = await ant.prepareSession('t1', wav.path, out: out, clean: true);
     debugPrint('CLEAR ${ms()} length=${prepared.length} enhanced=${prepared.enhanced} problem=${prepared.problem} '
         'm4a=${File(out).lengthSync()} bytes');
     expect(prepared.enhanced, isTrue);
@@ -66,9 +70,9 @@ void main() {
     debugPrint('ROUTE $route');
 
     ms();
-    final heard = await ant.transcribeVoz('t1');
-    debugPrint('VOZ ${ms()} "${heard?.words.map((w) => w.text).join(' ')}"');
-    debugPrint('VOZ words ${heard?.words.take(6).toList()}');
+    final heard = await ant.transcribePhonon('t1', 'en');
+    debugPrint('PHONON ${ms()} "${heard?.words.map((w) => w.text).join(' ')}"');
+    debugPrint('PHONON words ${heard?.words.take(6).toList()}');
     expect(heard?.problem, isNull);
     expect(heard!.words, isNotEmpty);
     expect(heard.timed, isTrue);
@@ -91,11 +95,6 @@ void main() {
     final topics = await ant.topics(heard.words.map((w) => w.text).join(' '));
     debugPrint('GIST ${ms()} $topics');
     expect(topics, isNotEmpty);
-
-    ms();
-    final emoji = await ant.emoji('Dentist appointment', limit: 3);
-    debugPrint('EMO ${ms()} Dentist appointment -> $emoji');
-    expect(emoji, isNotEmpty);
 
     ms();
     final title = await ant.title(heard.words.map((w) => w.text).join(' '));
@@ -158,14 +157,14 @@ void main() {
     )!;
     debugPrint('WORDS language=${words.language} engine=${words.engine} aligned=${words.aligned} n=${words.words.length}');
     expect(words.words, isNotEmpty);
-    expect(words.aligned, isTrue);
+    expect(words.aligned, isFalse, reason: 'refined word times come with Clean up, when asked for');
 
     // The note's transcript lines back up with the times, as the read-along view does it.
     final spoken = noteParts(done.text).whereType<SpokenPart>().single;
     final times = timesFor([for (final t in transcriptTokens(spoken.text)) t.text], words.words);
     expect(times.where((t) => t != null).length, words.words.length);
 
-    // A typed note: an emoji on its task, its topics, a title.
+    // A typed note: its topics and a title.
     final typed = await book.create('Untitled', text: '- [ ] Dentist appointment on Friday\n\n'
         'Notes on the quarterly budget review: revenue grew, marketing spend went down, and we need to hire two '
         'engineers before the product launch in March.\n');
@@ -174,7 +173,6 @@ void main() {
     final enriched = book.byPath(path)!;
     debugPrint('TYPED ${enriched.path}\n${enriched.text}');
     expect(enriched.title, isNot('Untitled'));
-    expect(enriched.text, matches(RegExp(r'- \[ \] \S+ Dentist appointment')));
     expect(enriched.tags, isNotEmpty);
   }, timeout: const Timeout(Duration(minutes: 15)));
 }

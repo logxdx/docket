@@ -2,9 +2,9 @@
 /// as the on-device models give them (lib/app/desert_ant.dart), and how they
 /// become a note's text.
 ///
-/// - Which recognizer hears a recording ([routeFor]): Voz knows 25 European
-///   languages and does not detect which one it hears, so Ear names the
-///   language first; another language goes to the phone's own on-device
+/// - Which recognizer hears a recording ([routeFor]): Phonon-2.5 knows 25
+///   European languages and does not detect which one it hears, so Ear names
+///   the language first; another language goes to the phone's own on-device
 ///   recognizer, never to a model that would return confident nonsense.
 /// - Who spoke ([assignSpeakers]): Who's turns laid over the words.
 /// - The transcript in the note ([transcriptMarkdown]): plain, editable
@@ -52,11 +52,8 @@ typedef Turn = ({int speaker, double start, double end});
 
 /// The recognizers a recording can go to.
 enum Engine {
-  /// Desert Ant's Voz: 25 European languages, a time on every word.
-  voz,
-
-  /// Fermion Research's Phonon-2.5 (from the same Parakeet-TDT model as Voz, many times
-  /// faster on a phone): its English model for English, its 25-language one otherwise.
+  /// Fermion Research's Phonon-2.5 (from NVIDIA's Parakeet-TDT v3): its English model for English, its
+  /// 25-language one otherwise; a time on every word.
   phonon,
 
   /// The phone's own recognizer, on the device only: any language it has an
@@ -64,8 +61,8 @@ enum Engine {
   device,
 }
 
-/// The languages Voz (and Phonon-2.5, from the same Parakeet-TDT v3) transcribes (ISO 639-1).
-const vozLanguages = {
+/// The languages Phonon-2.5 transcribes (ISO 639-1).
+const phononLanguages = {
   'bg', 'hr', 'cs', 'da', 'nl', 'en', 'et', 'fi', 'fr', 'de', 'el', 'hu', 'it', //
   'lv', 'lt', 'mt', 'pl', 'pt', 'ro', 'ru', 'sk', 'sl', 'es', 'sv', 'uk',
 };
@@ -77,37 +74,26 @@ typedef Attempt = ({Engine engine, String language});
 /// [candidates] (language, probability) and whether it called the answer
 /// reliable.
 ///
-/// - The top language is one of Voz's: Voz. It is the same model for all 25,
-///   so even an unsure call between two of them routes correctly.
+/// - The top language is one of Phonon's: Phonon. Its 25-language model is
+///   one model for all of them, so even an unsure call between two routes
+///   correctly.
 /// - The top language is not, and Ear is sure: only the phone's recognizer in
-///   that language. Voz would return confident nonsense, so it is not tried.
-/// - Not sure, and the runner-up is one of Voz's: the phone's recognizer in
-///   the top language first, then Voz.
-/// - Norwegian: Ear never calls the Nordic languages reliable, and Voz has
-///   Danish and Swedish but not Norwegian: the phone's recognizer, then Voz.
-/// - Nothing to go on (no speech found): Voz.
-///
-/// [prefer] Phonon (Settings › Saved transcript): every Voz attempt becomes a
-/// Phonon one with Voz right after it, in case Phonon cannot run on the phone.
-List<Attempt> routeFor(List<(String, double)> candidates, {required bool reliable, Engine prefer = Engine.voz}) {
-  final route = _route(candidates, reliable: reliable);
-  if (prefer != Engine.phonon) return route;
-  return [
-    for (final a in route)
-      if (a.engine == Engine.voz) ...[(engine: Engine.phonon, language: a.language), a] else a,
-  ];
-}
-
-List<Attempt> _route(List<(String, double)> candidates, {required bool reliable}) {
-  if (candidates.isEmpty) return const [(engine: Engine.voz, language: '')];
+///   that language. Phonon would return confident nonsense, so it is not tried.
+/// - Not sure, and the runner-up is one of Phonon's: the phone's recognizer in
+///   the top language first, then Phonon.
+/// - Norwegian: Ear never calls the Nordic languages reliable, and Phonon has
+///   Danish and Swedish but not Norwegian: the phone's recognizer, then Phonon.
+/// - Nothing to go on (no speech found): Phonon.
+List<Attempt> routeFor(List<(String, double)> candidates, {required bool reliable}) {
+  if (candidates.isEmpty) return const [(engine: Engine.phonon, language: '')];
   final top = _base(candidates.first.$1);
-  if (vozLanguages.contains(top)) return [(engine: Engine.voz, language: top)];
+  if (phononLanguages.contains(top)) return [(engine: Engine.phonon, language: top)];
   final second = candidates.length > 1 ? _base(candidates[1].$1) : null;
-  if (top == 'no') return [(engine: Engine.device, language: 'no'), (engine: Engine.voz, language: second ?? 'da')];
+  if (top == 'no') return [(engine: Engine.device, language: 'no'), (engine: Engine.phonon, language: second ?? 'da')];
   if (reliable) return [(engine: Engine.device, language: top)];
   return [
     (engine: Engine.device, language: top),
-    if (second != null && vozLanguages.contains(second)) (engine: Engine.voz, language: second),
+    if (second != null && phononLanguages.contains(second)) (engine: Engine.phonon, language: second),
   ];
 }
 
@@ -283,7 +269,8 @@ class SpokenWords {
       return SpokenWords(
         words: [for (final w in j['words'] as List) TimedWord.fromJson(w as List<Object?>)],
         language: '${j['language'] ?? ''}',
-        engine: Engine.values.firstWhere((e) => e.name == j['engine'], orElse: () => Engine.voz),
+        // A transcript made by Voz (Docket before 0.3) reads as Phonon's: the same model family, the same words.
+        engine: Engine.values.firstWhere((e) => e.name == j['engine'], orElse: () => Engine.phonon),
         duration: (j['duration'] as num?)?.toDouble() ?? 0,
         speakers: (j['speakers'] as num?)?.toInt() ?? 1,
         aligned: j['aligned'] == true,

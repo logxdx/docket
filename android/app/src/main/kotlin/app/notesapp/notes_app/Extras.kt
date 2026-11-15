@@ -9,7 +9,7 @@ import android.content.Context
  * The two models Desert Ant ships for Apple only, ported to Android in
  * third_party/desert-ant-core: Align (tighter word times, branch android-align) and Title
  * (a note's title and a one-line description, branch android-title). Each runs only from
- * its offline folder; without it the notes do without: Voz's own word times, and a title
+ * its offline folder; without it the notes do without: the recognizer's own word times, and a title
  * taken from the text.
  */
 class Extras(
