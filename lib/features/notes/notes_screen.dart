@@ -96,6 +96,31 @@ class _NotesScreenState extends State<NotesScreen> {
     if (mounted) await _open(note, edit: true);
   }
 
+  /// + : a note, or a note from a picture or an audio file.
+  Future<void> _add() async {
+    final picked = await showModalBottomSheet<Future<void> Function()>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          for (final (icon, label, hint, action) in [
+            (Icons.edit_note_rounded, 'Note', 'Write', _new),
+            (Icons.image_outlined, 'Picture', 'A note holding a picture from the phone', _newPicture),
+            (Icons.audio_file_outlined, 'Audio file', 'Transcribed, titled and tagged like a recording', _newAudio),
+          ])
+            ListTile(
+              leading: Icon(icon),
+              title: Text(label),
+              subtitle: Text(hint),
+              onTap: () => Navigator.pop(context, action),
+            ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+    if (picked != null && mounted) await picked();
+  }
+
   /// A picture or a sound from the phone ([mime]); null when cancelled or unreadable (said).
   Future<({String path, String name})?> _pick(String mime) async {
     try {
@@ -567,27 +592,10 @@ class _NotesScreenState extends State<NotesScreen> {
           },
           child: Scaffold(
             appBar: _appBar(readOnly, shown),
-            // A note, or one straight from a picture or a sound file: one tap each.
+            // A note, or one from a picture or a sound file: chosen from +.
             floatingActionButton: readOnly || _selecting
                 ? null
-                : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.end, children: [
-                    for (final (tag, icon, tip, action) in [
-                      ('picture', Icons.image_outlined, 'Note from a picture', _newPicture),
-                      ('audio', Icons.audio_file_outlined, 'Note from an audio file', _newAudio),
-                    ]) ...[
-                      FloatingActionButton.small(
-                        heroTag: tag,
-                        onPressed: action,
-                        tooltip: tip,
-                        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-                        foregroundColor: Theme.of(context).colorScheme.onSurface,
-                        child: Icon(icon),
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                    const SizedBox(height: 4),
-                    FloatingActionButton(heroTag: 'note', onPressed: _new, tooltip: 'New note', child: const Icon(Icons.add_rounded)),
-                  ]),
+                : FloatingActionButton(onPressed: _add, tooltip: 'New', child: const Icon(Icons.add_rounded)),
             body: Column(children: [
               // The first launch after an install: the on-device models are put in place once.
               ValueListenableBuilder<double?>(
