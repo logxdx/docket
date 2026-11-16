@@ -74,18 +74,24 @@ flutter build apk --debug
 Every model runs on the phone. `python3 -I tool/fetch_models.py` fetches each
 one's Android files, pinned to the revision its SDK release (4.3.0) declares
 and checked against the Hub's SHA-256, into `.models/` (gitignored), and
-`tool/stage_models.py` splits them:
-- **In the APK**: Phonon-2.5 and its English model (transcripts) and the
-  Phonon voice (reading aloud), packed as uncompressed assets and copied
-  into the app's folder on the first launch after an install
-  (`OfflineModels.kt`).
-- **Downloaded in the app**: the Desert Ant models (Title, Gist, Ear, Clear,
-  Who, Align, about 450 MB), left out to keep the APK small. Settings ›
-  On-device models (and a card on the notes list until they are there)
-  fetches each from Hugging Face at its pinned revision, keeps a file only
-  when its size and sha256 match, and goes on where a stopped download left
-  off. Without them notes are still written and transcribed; titles, tags
-  and Clean up wait for them.
+`tool/stage_models.py` lists them all as downloads: the APK carries no
+model (about 100 MB, nearly all native code). The first time the app is
+opened it offers three things to download, as Settings › On-device models
+does later (and a card on the notes list until something is there):
+- **STT model** (about 420 MB): Phonon-2.5 and Phonon-2.5 English, Ear,
+  Clear, Who and Align: recordings to text, and Clean up.
+- **TTS model** (about 70 MB): the Phonon voice, for reading aloud.
+- **Notes models** (about 790 MB): Title, Gist, EmbeddingGemma 2 and
+  Mirage: titles, tags, and search by meaning.
+
+Each model comes from Hugging Face at its pinned revision and is kept only
+when its sizes and sha256 match (`OfflineModels.kt`); a stopped download
+goes on where it left off. Phonon's recognizers come as their pinned
+`.tar.zst` archives, unpacked as they stream in (zstd-jni), and
+EmbeddingGemma 2's container is cut into its graphs and weights as it
+streams. Without a model, what needs it waits (the phone's own recognizer
+still transcribes some languages); the app never downloads on its own.
+`--bundle <ids>` carries chosen models in the APK instead.
 
 Each SDK is then pointed at its model's folder and uses it with no network.
 Docket is built for arm64-v8a phones only (no x86_64, so no emulator):
@@ -96,9 +102,11 @@ happens to exist (their licence counts monthly devices); nothing of the
 notes or the audio is ever sent. `INTERNET` stays for that and the optional
 model server.
 
-**Search by meaning**, also on the phone and offline, both models optional
-downloads (Settings › On-device models): Google's EmbeddingGemma 2 (its
-LiteRT-LM text+vision build, 388 MB, Apache-2.0) puts notes, recordings'
+**Search by meaning**, also on the phone and offline (both models in the
+notes models): Google's EmbeddingGemma 2 (its text+vision build, 388 MB,
+Apache-2.0; its graphs run on the same `libLiteRt.so` as Desert Ant's
+models, the tokenizer and picture preprocessing done as LiteRT-LM does them
+in `Embedder.kt` and `SentencePiece.kt`) puts notes, recordings'
 transcripts (in moments that play from where they start) and the pictures
 themselves in one space, so "puppy" finds a photo of a dog and "free
 audiobooks" a recording about LibriVox; Cactus Compute's Mirage (22 MB,
@@ -150,8 +158,8 @@ own code on a device or emulator (see its header).
 - `tool/ci.sh`: analysis, Dart tests, Kotlin tests and a debug APK. The
   GitHub workflow `.github/workflows/ci.yml` runs exactly this.
 - `tool/release.sh vX.Y.Z [--publish]`: fetches and checks the models
-  (`tool/fetch_models.py`), stages the Phonon models into the APK and lists
-  the Desert Ant ones as downloads (`tool/stage_models.py`), builds the arm64
+  (`tool/fetch_models.py`), lists every model as a download
+  (`tool/stage_models.py`), builds the arm64
   APK (refusing one without the app's code or over GitHub's 2 GiB per file),
   writes `SHA256SUMS`, and with `--publish`
   tags and creates the GitHub release. `.github/workflows/release.yml` runs

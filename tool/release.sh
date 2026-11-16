@@ -5,7 +5,7 @@
 #   tool/release.sh v0.1.0             # build into build/release/v0.1.0
 #   tool/release.sh v0.1.0 --publish   # and create the GitHub release with its files
 #
-# A release holds: the arm64 APK (carrying the Phonon models; the Desert Ant ones are downloaded in the app,
+# A release holds: the arm64 APK (no models: the app downloads them, offered the first time it is opened and in
 # Settings › On-device models) and its SHA-256 sum.
 # Signing: DOCKET_KEYSTORE, DOCKET_KEYSTORE_PASSWORD, DOCKET_KEY_ALIAS, DOCKET_KEY_PASSWORD when set
 # (android/app/build.gradle.kts), else this machine's debug key.
@@ -54,10 +54,9 @@ if [ "$publish" = "--publish" ]; then
   cat > "$notes" <<NOTES
 Docket $version for Android (arm64).
 
-- **docket-$version-arm64.apk**: the app, with Phonon-2.5 (and its English model) for transcripts and
-  the Phonon voice for reading aloud. The Desert Ant models (Title, Gist, Ear, Clear, Who, Align) are
-  downloaded in the app from Hugging Face when wanted (Settings › On-device models), every file checked;
-  everything runs on the phone.
+- **docket-$version-arm64.apk**: the app. Its models are downloaded in the app from Hugging Face the
+  first time it is opened (speech to text, reading aloud, and the notes models for titles, tags and search),
+  every file checked; everything runs on the phone.
 - **SHA256SUMS**: its checksum.
 NOTES
   # The tag: made here when it is not there yet (a local run), never moved or forced.
