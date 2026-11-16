@@ -11,6 +11,7 @@
 -dontwarn com.google.android.play.**
 -dontwarn com.google.common.**
 -dontwarn kotlinx.coroutines.guava.**
+-dontwarn com.google.android.gms.tasks.**
 
 # The classes whose native methods are bound by name (Java_app_notesapp_notes_1app_<Class>_<method>).
 -keepclasseswithmembernames class app.notesapp.notes_app.** { native <methods>; }
