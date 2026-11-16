@@ -96,6 +96,19 @@ happens to exist (their licence counts monthly devices); nothing of the
 notes or the audio is ever sent. `INTERNET` stays for that and the optional
 model server.
 
+**Search by meaning**, also on the phone and offline, both models optional
+downloads (Settings › On-device models): Google's EmbeddingGemma 2 (its
+LiteRT-LM text+vision build, 388 MB, Apache-2.0) puts notes, recordings'
+transcripts (in moments that play from where they start) and the pictures
+themselves in one space, so "puppy" finds a photo of a dog and "free
+audiobooks" a recording about LibriVox; Cactus Compute's Mirage (22 MB,
+Apache-2.0) tags each picture with what is in it and the text it can read,
+as hidden keyword terms, never written into a note. Keyword and meaning
+hits are fused by rank under the same filters. The index is kept in the
+app's own folder, one per vault, and follows the notes in the background.
+Mirage runs in `libmirage_jni.so` (Cactus's engine linked in, built by
+`tool/build_mirage_jni.sh`).
+
 **Desert Ant's models are built from source.** Align and Title were
 Apple-only in Desert Ant's SDK; Docket ports them as patches on Desert Ant's
 v4.3.0 source (`third_party/desert-ant-core-patches/0001`, `0002`), going
