@@ -243,9 +243,9 @@ class _SpokenTranscriptState extends State<SpokenTranscript> with SingleTickerPr
     final w = _words;
     final about = [
       if (w != null && w.language.isNotEmpty) languageName(w.language),
-      if (w != null) switch (w.engine) { Engine.phonon => 'Phonon', Engine.device => 'phone recognizer' },
+      if (w != null && w.engine == Engine.device) 'phone recognizer',
       if (w != null && w.speakers > 1) '${w.speakers} speakers',
-      if (w != null && w.aligned) 'times refined by Align',
+      if (w != null && w.aligned) 'word times refined',
       if (timed && widget.playback != null) 'tap a word to play from it',
     ].join(' · ');
 
@@ -408,7 +408,7 @@ class _CleanUpSheetState extends State<_CleanUpSheet> {
         child: ListView(shrinkWrap: true, children: [
           ListTile(
             title: const Text('Detect it'),
-            subtitle: const Text('Ear hears the language'),
+            subtitle: const Text('Heard from the recording'),
             trailing: _language == null ? const Icon(Icons.check_rounded) : null,
             onTap: () => Navigator.pop(context, ''),
           ),
@@ -416,7 +416,7 @@ class _CleanUpSheetState extends State<_CleanUpSheet> {
             ListTile(
               dense: true,
               title: Text(languageName(code)),
-              subtitle: Text(phononLanguages.contains(code) ? 'Phonon' : 'Phone recognizer'),
+              subtitle: Text(phononLanguages.contains(code) ? 'On this phone' : 'The phone\'s recognizer'),
               trailing: code == _language ? const Icon(Icons.check_rounded) : null,
               onTap: () => Navigator.pop(context, code),
             ),
@@ -468,13 +468,15 @@ class _CleanUpSheetState extends State<_CleanUpSheet> {
             value: _transcribe && _speakers,
             onChanged: _transcribe ? (on) => setState(() => _speakers = on) : null,
             title: const Text('Tell speakers apart'),
-            subtitle: const Text('Who marks who said what.'),
+            subtitle: const Text('Marks who said what.'),
           ),
           SwitchListTile(
             value: _transcribe && _timing,
             onChanged: _transcribe && widget.canTime ? (on) => setState(() => _timing = on) : null,
             title: const Text('Time every word'),
-            subtitle: Text(widget.canTime ? 'Align refines each word\'s time, for reading along.' : 'Align is not on this phone.'),
+            subtitle: Text(widget.canTime
+                ? 'Refines each word\'s time, for reading along.'
+                : 'Needs the STT model (Settings › On-device models).'),
           ),
           const SizedBox(height: 8),
           Align(

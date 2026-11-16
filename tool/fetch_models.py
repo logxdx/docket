@@ -93,11 +93,13 @@ PHONON_LOCAL = os.environ.get(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".tooling", "models"))
 ARCHIVES = {
     # 25 languages; decoded with 0.25 s of leading silence, Greek final sigma restored (PhononAsr.kt).
-    "phonon-p25": dict(repo="FermionResearch/Phonon-2.5", archive="phonon-2.5.bps.tar.zst",
+    "phonon-p25": dict(repo="FermionResearch/Phonon-2.5", revision="2af4bb8ccceb66a8ce06c4081bb968f1802c1e58",
+                       archive="phonon-2.5.bps.tar.zst",
                        sha256="1faa04053a472cabab3bc31d07f30c23f22906f71044ca10eb1f0de36d1f19a9",
                        size=162_587_031, local="phonon2/p25", unpacked=177_871_642),
     # English, decoded as it is.
-    "phonon-en": dict(repo="FermionResearch/Phonon-2.5-English", archive="phonon-2.5-en.bps.tar.zst",
+    "phonon-en": dict(repo="FermionResearch/Phonon-2.5-English", revision="da200358d638886bc96c758c672ad5568828b119",
+                      archive="phonon-2.5-en.bps.tar.zst",
                       sha256="6bd8119ac5a637e5ece0666f5c1e43dbcd99e1c36b3d0ef3ec5f9b58260a9dd4",
                       size=163_693_770, local="phonon2/en", unpacked=177_757_399),
 }
@@ -122,7 +124,8 @@ def fetch_archive_model(model_id, spec, root, only_list):
         else:
             with tempfile.TemporaryDirectory() as tmp:
                 archive = os.path.join(tmp, spec["archive"])
-                fetch(f"{HUB}/{spec['repo']}/resolve/main/{spec['archive']}", archive, spec["size"], spec["sha256"])
+                fetch(f"{HUB}/{spec['repo']}/resolve/{spec['revision']}/{spec['archive']}", archive, spec["size"],
+                      spec["sha256"])
                 subprocess.run(["tar", "--zstd", "-xf", archive, "-C", tmp], check=True)
                 for f in ARCHIVE_FILES:
                     found = [os.path.join(d, f) for d, _, names in os.walk(tmp) if f in names]
@@ -135,7 +138,9 @@ def fetch_archive_model(model_id, spec, root, only_list):
     files = [{"path": f, "size": os.path.getsize(os.path.join(dest, f)), "sha256": sha256(os.path.join(dest, f))}
              for f in ARCHIVE_FILES]
     print(f"{model_id:10} {spec['repo']}: {spec['unpacked'] / 1e6:7.1f} MB")
-    return {"repo": spec["repo"], "revision": spec["archive"], "files": files}
+    # The app downloads the archive (pinned commit, its sha256 checked) and keeps these files from it.
+    return {"repo": spec["repo"], "revision": spec["revision"],
+            "archive": {"path": spec["archive"], "size": spec["size"], "sha256": spec["sha256"]}, "files": files}
 
 
 # Gradium's Phonon voice (text-to-speech, English; xn-ptts v0.6.0): one folder made of two repos,
@@ -203,8 +208,9 @@ def fetch_multi_model(model_id, parts, root, only_list):
         fetch(f"{HUB}/{e['repo']}/resolve/{e['revision']}/{e['remote']}", dest, e["size"], e["sha256"])
         if not e["sha256"]:  # small files the Hub keeps out of LFS: their digest, for the manifest
             e["sha256"] = sha256(dest)
-    files = [{"path": e["path"], "size": e["size"], "sha256": e["sha256"] or sha256(os.path.join(root, model_id, e["path"]))}
-             for e in entries]
+    # Each file with the repo and commit it comes from (the app downloads them one by one).
+    files = [{"path": e["path"], "size": e["size"], "sha256": e["sha256"] or sha256(os.path.join(root, model_id, e["path"])),
+              "repo": e["repo"], "revision": e["revision"], "remote": e["remote"]} for e in entries]
     return {"repo": " + ".join(f"{r}@{v}" for r, v, _ in parts), "revision": "pinned", "files": files}, total
 
 

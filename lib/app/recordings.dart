@@ -281,7 +281,9 @@ class Recordings extends ChangeNotifier {
           Engine.device => await ant.transcribeOnDevice(id, a.language),
         };
         if (h == null) {
-          problems.add(a.engine == Engine.phonon ? 'Phonon is not on this phone.' : 'No on-device recognizer.');
+          problems.add(a.engine == Engine.phonon
+              ? 'The STT model is not on this phone (Settings › On-device models).'
+              : 'No on-device recognizer.');
         } else if (h.problem != null) {
           problems.add(h.problem!);
         } else {

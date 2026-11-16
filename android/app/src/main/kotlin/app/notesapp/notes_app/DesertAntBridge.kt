@@ -406,7 +406,7 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
             else Audio.DecodedSource(context, source)
         input.use { for ((block, rate) in Audio.blocks(it, chunkSec)) emit(block, rate) }
         writer?.finish()
-        if (out != null && clean && enhancer == null) problem = "Audio cleanup (Clear) is not on this phone; the recording is kept as recorded."
+        if (out != null && clean && enhancer == null) problem = "Audio cleanup needs the STT model (Settings › On-device models); the recording is kept as recorded."
         val samples = analysis.toArray()
         if (samples.isEmpty()) throw IllegalStateException("the recording is empty")
         sessions[id] = Session(samples, analysisRate, samples.size.toDouble() / analysisRate)

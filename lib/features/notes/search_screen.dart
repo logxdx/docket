@@ -371,7 +371,7 @@ class _SearchScreenState extends State<SearchScreen> {
                         padding: const EdgeInsets.all(32),
                         child: Text(
                           'Nothing found. Words search note text, recordings\' transcripts, pictures\' names, '
-                          'captions and what is in them, and tasks; with EmbeddingGemma on the phone, what they mean '
+                          'captions and what is in them, and tasks; with the notes models on the phone, what they mean '
                           'is searched too. "phrases", -left out, OR, tag:#x and [property] work as in Obsidian.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: theme.colorScheme.outline),

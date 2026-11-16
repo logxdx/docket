@@ -16,37 +16,37 @@ object VoiceFile {
     /** null when [file] is a Phonon voice, else what is wrong with it, for the user. */
     fun problem(file: File): String? {
         val size = file.length()
-        if (size < 16 || size > 64L shl 20) return "This is not a Phonon voice file (wrong size)."
+        if (size < 16 || size > 64L shl 20) return "This is not a voice file (wrong size)."
         return try {
             RandomAccessFile(file, "r").use { f ->
                 val head = ByteArray(8)
                 f.readFully(head)
                 var n = 0L
                 for (i in 7 downTo 0) n = (n shl 8) or (head[i].toLong() and 0xff)
-                if (n <= 0 || n > 1 shl 20 || 8 + n > size) return "This is not a Phonon voice file (no safetensors header)."
+                if (n <= 0 || n > 1 shl 20 || 8 + n > size) return "This is not a voice file (no safetensors header)."
                 val json = ByteArray(n.toInt())
                 f.readFully(json)
                 val header = JSONObject(String(json, Charsets.UTF_8))
                 val tensor = header.optJSONObject("speaker_wavs")
-                    ?: return "This is not a Phonon voice file (no speaker_wavs in it)."
+                    ?: return "This is not a voice file (no speaker_wavs in it)."
                 val tensors = header.keys().asSequence().filter { it != "__metadata__" }.toList()
-                if (tensors.size != 1) return "This is not a Phonon voice file (it holds ${tensors.size} tensors)."
-                if (tensor.optString("dtype") != "F32") return "This is not a Phonon voice file (not float32)."
+                if (tensors.size != 1) return "This is not a voice file (it holds ${tensors.size} tensors)."
+                if (tensor.optString("dtype") != "F32") return "This is not a voice file (not float32)."
                 val shape = tensor.getJSONArray("shape")
                 if (shape.length() != 3 || shape.getLong(0) != 1L || shape.getLong(1) != CHANNELS.toLong()) {
-                    return "This is not a Phonon voice file (shape $shape, not [1, $CHANNELS, n])."
+                    return "This is not a voice file (shape $shape, not [1, $CHANNELS, n])."
                 }
                 val frames = shape.getLong(2)
-                if (frames !in 1..4000) return "This is not a Phonon voice file ($frames frames)."
+                if (frames !in 1..4000) return "This is not a voice file ($frames frames)."
                 val offsets = tensor.getJSONArray("data_offsets")
                 val bytes = 4L * CHANNELS * frames
                 if (offsets.getLong(0) != 0L || offsets.getLong(1) != bytes || 8 + n + bytes != size) {
-                    return "This is not a Phonon voice file (its size does not match its header)."
+                    return "This is not a voice file (its size does not match its header)."
                 }
                 null
             }
         } catch (e: Exception) {
-            "This is not a Phonon voice file (${e.message ?: "unreadable"})."
+            "This is not a voice file (${e.message ?: "unreadable"})."
         }
     }
 

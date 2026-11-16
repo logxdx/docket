@@ -124,6 +124,9 @@ dependencies {
         exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-guava")
     }
     implementation(fileTree("libs") { include("*.aar") })
+    // zstd, to unpack the speech recognizers' archives as they download (OfflineModels.unpack).
+    implementation("com.github.luben:zstd-jni:1.5.7-12@aar")
+    testImplementation("com.github.luben:zstd-jni:1.5.7-12")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation("junit:junit:4.13.2")
     // The real org.json for JVM unit tests (Android's is a stub there).

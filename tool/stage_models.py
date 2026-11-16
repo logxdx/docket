@@ -2,13 +2,13 @@
 """Stage the models the APK carries: .models-bundle/models/<id>/..., hard links into .models/ (no
 extra disk), and a manifest.json the app reads. Two lists:
 
-- "models": carried by the APK (Fermion Research's Phonon models: the recognizer and the voice);
-- "downloads": every other model (Desert Ant's, Mirage, EmbeddingGemma 2), left out to keep the APK
-  small; the app fetches them from Hugging Face when the user asks (Settings › On-device models), each
-  file from the revision pinned here and kept only when its size and sha256 match.
+- "models": carried by the APK: none, unless asked for with --bundle;
+- "downloads": every model, left out to keep the APK small; the app fetches them from Hugging Face the
+  first time it is opened (or later, Settings › On-device models), each file (or archive) from the
+  revision pinned here and kept only when its size and sha256 match.
 
-    python3 -I tool/stage_models.py                 # all but Phonon's as downloads
-    python3 -I tool/stage_models.py --bundle title  # carry Title in the APK too
+    python3 -I tool/stage_models.py                  # every model a download
+    python3 -I tool/stage_models.py --bundle title   # carry Title in the APK
 """
 import json
 import os
@@ -28,8 +28,9 @@ shutil.rmtree(dst, ignore_errors=True)
 os.makedirs(dst)
 kept, downloads, total, later = {}, {}, 0, 0
 for model_id, model in manifest["models"].items():
-    # Phonon's models (speech recognition, the reading voice) ride in the APK; every other one is downloaded.
-    if not model_id.startswith("phonon") and model_id not in bundle:
+    # Every model is downloaded in the app, the first time it is opened (Settings › On-device models); --bundle
+    # carries some in the APK instead (a build for a phone kept offline).
+    if model_id not in bundle:
         downloads[model_id] = model
         later += sum(f["size"] for f in model["files"])
         continue

@@ -22,7 +22,9 @@ import java.security.MessageDigest
  * without its own download bookkeeping) is used as-is. A model not in place is reported missing and
  * never constructed, so no SDK ever downloads on its own.
  * A file the manifest gives a "split" (EmbeddingGemma 2's container) is kept as its parts only, each where the
- * manifest says: written as it downloads, the whole stream checked against the file's sha256.
+ * manifest says: written as it downloads, the whole stream checked against the file's sha256. A model the manifest
+ * gives an "archive" (Phonon's recognizers: a .tar.zst) is downloaded as that archive and kept as the files it lists,
+ * unpacked as it streams in; the archive's sha256 and each file's are checked.
  */
 class OfflineModels(private val context: Context) {
     private val root = File(context.filesDir, "models")
@@ -57,14 +59,34 @@ class OfflineModels(private val context: Context) {
         return models.keys().asSequence().toList()
     }
 
-    /** How many bytes [id] takes to download, all its files together. */
-    fun sizeOf(id: String): Long = specsOf(id)?.sumOf { it.size } ?: 0L
+    /** How many bytes [id] takes to download: its archive, or all its files together. */
+    fun sizeOf(id: String): Long = archiveOf(id)?.size ?: specsOf(id)?.sumOf { it.size } ?: 0L
+
+    /** A model's archive (Phonon's recognizers): downloaded whole, unpacked into the files the manifest lists. */
+    internal data class Archive(val path: String, val size: Long, val sha256: String)
+
+    private fun archiveOf(id: String): Archive? {
+        val model = bundled?.optJSONObject("downloads")?.optJSONObject(id) ?: return null
+        val a = model.optJSONObject("archive") ?: return null
+        return Archive(a.getString("path"), a.getLong("size"), a.optString("sha256"))
+    }
 
     /** A part of a file kept cut up: [path] in the model's folder, bytes [begin] to [end] of the file. */
-    private data class Part(val path: String, val begin: Long, val end: Long)
+    internal data class Part(val path: String, val begin: Long, val end: Long)
 
-    /** A file as the manifest pins it, and its parts when it is kept cut up. */
-    private data class Spec(val path: String, val size: Long, val sha256: String, val split: List<Part>)
+    /**
+     * A file as the manifest pins it, and its parts when it is kept cut up; where it comes from when that is not its
+     * model's repo and revision ([repo], [revision], its own path there [remote]).
+     */
+    internal data class Spec(
+        val path: String,
+        val size: Long,
+        val sha256: String,
+        val split: List<Part>,
+        val repo: String? = null,
+        val revision: String? = null,
+        val remote: String? = null,
+    )
 
     private fun specsOf(id: String): List<Spec>? {
         val model = bundled?.optJSONObject("models")?.optJSONObject(id)
@@ -79,7 +101,10 @@ class OfflineModels(private val context: Context) {
                 }.sortedBy { p -> p.begin }
             } ?: emptyList()
             // A JSON null (no checksum pinned) is no checksum, not the text "null".
-            Spec(f.getString("path"), f.getLong("size"), if (f.isNull("sha256")) "" else f.optString("sha256"), split)
+            Spec(
+                f.getString("path"), f.getLong("size"), if (f.isNull("sha256")) "" else f.optString("sha256"), split,
+                f.optString("repo").ifEmpty { null }, f.optString("revision").ifEmpty { null }, f.optString("remote").ifEmpty { null },
+            )
         }
     }
 
@@ -107,44 +132,161 @@ class OfflineModels(private val context: Context) {
         val repo = model.getString("repo")
         val revision = model.getString("revision")
         val specs = specsOf(id)!!
-        val total = specs.sumOf { it.size }
         val dir = File(root, id)
-        var done = 0L
         cancelled -= id
+        archiveOf(id)?.let { archive ->
+            if (specs.all { present(dir, it) }) return
+            fetch(id, "https://huggingface.co/$repo/resolve/$revision/${archive.path}") { input ->
+                unpack(input, dir, archive, specs, "$id/${archive.path}") { got ->
+                    if (id in cancelled) throw InterruptedException("Download stopped.")
+                    progress(got, archive.size)
+                }
+            }
+            File(dir, ".dal-meta").deleteRecursively()
+            return
+        }
+        val total = specs.sumOf { it.size }
+        var done = 0L
         for (spec in specs) {
             if (present(dir, spec)) {
                 done += spec.size
                 progress(done, total)
                 continue
             }
-            val connection = URL("https://huggingface.co/$repo/resolve/$revision/${spec.path}").openConnection() as HttpURLConnection
-            connection.connectTimeout = 20_000
-            connection.readTimeout = 60_000
-            connection.instanceFollowRedirects = true
-            try {
-                if (connection.responseCode !in 200..299) {
-                    throw IllegalStateException("Hugging Face answered ${connection.responseCode} for $id/${spec.path}.")
+            val base = done
+            val url = "https://huggingface.co/${spec.repo ?: repo}/resolve/${spec.revision ?: revision}/${spec.remote ?: spec.path}"
+            fetch(id, url) { input ->
+                place(input, dir, spec, "$id/${spec.path}") { got ->
+                    if (id in cancelled) throw InterruptedException("Download stopped.")
+                    progress(base + got, total)
                 }
-                val base = done
-                connection.inputStream.use { input ->
-                    place(input, dir, spec, "$id/${spec.path}") { got ->
-                        if (id in cancelled) throw InterruptedException("Download stopped.")
-                        progress(base + got, total)
-                    }
-                }
-            } catch (e: java.net.UnknownHostException) {
-                throw IllegalStateException("No internet connection: the models come from Hugging Face. Try again when online.")
-            } catch (e: InterruptedException) {
-                throw IllegalStateException("Download stopped.")
-            } catch (e: java.io.IOException) {
-                // A dropped connection keeps the files done so far: the next try goes on from there.
-                throw IllegalStateException("The download was cut off (${e.message}). Try again: it goes on where it stopped.")
-            } finally {
-                connection.disconnect()
             }
             done += spec.size
         }
         File(dir, ".dal-meta").deleteRecursively()
+    }
+
+    /** [url]'s body handed to [read], with what went wrong said plainly. */
+    private fun fetch(id: String, url: String, read: (java.io.InputStream) -> Unit) {
+        val connection = URL(url).openConnection() as HttpURLConnection
+        connection.connectTimeout = 20_000
+        connection.readTimeout = 60_000
+        connection.instanceFollowRedirects = true
+        try {
+            if (connection.responseCode !in 200..299) {
+                throw IllegalStateException("Hugging Face answered ${connection.responseCode} for $id (${url.substringAfterLast('/')}).")
+            }
+            connection.inputStream.use(read)
+        } catch (e: java.net.UnknownHostException) {
+            throw IllegalStateException("No internet connection: the models come from Hugging Face. Try again when online.")
+        } catch (e: InterruptedException) {
+            throw IllegalStateException("Download stopped.")
+        } catch (e: java.io.IOException) {
+            // A dropped connection keeps the files done so far: the next try goes on from there.
+            throw IllegalStateException("The download was cut off (${e.message}). Try again: it goes on where it stopped.")
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    companion object {
+    /**
+     * [input] ([archive]: a tar compressed with zstd) unpacked into [dir] as it streams: of its files, those in
+     * [files] are kept (by name), each checked against its size and sha256, and the archive's own bytes against its
+     * sha256; nothing is placed unless all of it is right. [onBytes] gets the archive's bytes read so far.
+     */
+    internal fun unpack(input: java.io.InputStream, dir: File, archive: Archive, files: List<Spec>, what: String,
+                        onBytes: (Long) -> Unit) {
+        val wanted = files.associateBy { it.path }
+        val digest = MessageDigest.getInstance("SHA-256")
+        var read = 0L
+        val counted = object : java.io.FilterInputStream(input) {
+            override fun read(): Int = super.read().also { if (it >= 0) { digest.update(it.toByte()); read++; onBytes(read) } }
+            override fun read(b: ByteArray, off: Int, len: Int): Int = super.read(b, off, len).also { n ->
+                if (n > 0) {
+                    digest.update(b, off, n)
+                    read += n
+                    onBytes(read)
+                }
+            }
+        }
+        dir.mkdirs()
+        val temps = HashMap<String, File>()
+        val sums = HashMap<String, String>()
+        val zstd = com.github.luben.zstd.ZstdInputStream(counted)
+        try {
+            untar(zstd, wanted.keys, dir, temps, sums)
+            // The rest of the archive (zstd may stop before its last bytes), for its checksum.
+            val buf = ByteArray(1 shl 16)
+            while (counted.read(buf) >= 0) Unit
+        } catch (e: Exception) {
+            temps.values.forEach { it.delete() }
+            throw e
+        } finally {
+            zstd.close()
+        }
+        val sha = digest.digest().joinToString("") { "%02x".format(it) }
+        val bad = when {
+            read != archive.size || (archive.sha256.isNotEmpty() && sha != archive.sha256) -> "the archive"
+            else -> files.firstOrNull { f ->
+                val t = temps[f.path]
+                t == null || t.length() != f.size || (f.sha256.isNotEmpty() && sums[f.path] != f.sha256)
+            }?.path
+        }
+        if (bad != null) {
+            temps.values.forEach { it.delete() }
+            throw IllegalStateException("$what did not come down whole ($bad differs). Try again.")
+        }
+        for ((path, t) in temps) {
+            if (!t.renameTo(File(dir, path))) throw IllegalStateException("could not place $path")
+        }
+    }
+
+    /** A tar's regular files named in [wanted] (by name, any folder) written beside their places as .part, with their sha256. */
+    private fun untar(tar: java.io.InputStream, wanted: Set<String>, dir: File, temps: MutableMap<String, File>,
+                      sums: MutableMap<String, String>) {
+        val header = ByteArray(512)
+        val buf = ByteArray(1 shl 16)
+        fun readFully(b: ByteArray, n: Int): Boolean {
+            var got = 0
+            while (got < n) {
+                val r = tar.read(b, got, n - got)
+                if (r < 0) return false
+                got += r
+            }
+            return true
+        }
+        while (readFully(header, 512)) {
+            if (header.all { it.toInt() == 0 }) break // the end: zero blocks
+            fun text(from: Int, len: Int) = String(header, from, len, Charsets.UTF_8).substringBefore(' ').trim()
+            val name = (text(345, 155).let { if (it.isEmpty()) "" else "$it/" } + text(0, 100)).substringAfterLast('/')
+            val size = text(124, 12).ifEmpty { "0" }.toLong(8)
+            val type = header[156].toInt().toChar()
+            val keep = (type == '0' || type == ' ') && name in wanted
+            val out = if (keep) File(dir, "$name.part").also { temps[name] = it }.outputStream() else null
+            val md = if (keep) MessageDigest.getInstance("SHA-256") else null
+            var left = size
+            try {
+                while (left > 0) {
+                    val n = tar.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
+                    if (n < 0) throw java.io.IOException("the archive ends inside $name")
+                    out?.write(buf, 0, n)
+                    md?.update(buf, 0, n)
+                    left -= n
+                }
+            } finally {
+                out?.close()
+            }
+            if (md != null) sums[name] = md.digest().joinToString("") { "%02x".format(it) }
+            // Each entry is padded to 512 bytes.
+            var pad = ((512 - size % 512) % 512).toInt()
+            while (pad > 0) {
+                val n = tar.read(buf, 0, pad)
+                if (n < 0) break
+                pad -= n
+            }
+        }
+    }
     }
 
     /**

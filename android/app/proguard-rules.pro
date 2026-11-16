@@ -13,5 +13,8 @@
 -dontwarn kotlinx.coroutines.guava.**
 -dontwarn com.google.android.gms.tasks.**
 
+# zstd-jni (unpacking the speech recognizers' archives): its JNI calls its classes by name.
+-keep class com.github.luben.zstd.** { *; }
+
 # The classes whose native methods are bound by name (Java_app_notesapp_notes_1app_<Class>_<method>).
 -keepclasseswithmembernames class app.notesapp.notes_app.** { native <methods>; }

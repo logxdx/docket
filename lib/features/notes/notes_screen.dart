@@ -963,6 +963,31 @@ class _ModelsNudge extends StatefulWidget {
 
 class _ModelsNudgeState extends State<_ModelsNudge> {
   @override
+  void initState() {
+    super.initState();
+    widget.services.ant.status.addListener(_firstOpen);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _firstOpen());
+  }
+
+  @override
+  void dispose() {
+    widget.services.ant.status.removeListener(_firstOpen);
+    super.dispose();
+  }
+
+  /// The first time the app is opened with no models on the phone: the download screen, once.
+  void _firstOpen() {
+    final s = widget.services;
+    final status = s.ant.status.value;
+    if (!mounted || s.settings.get('models.welcomed') == 'yes') return;
+    if (status.downloads.isEmpty || status.downloads.keys.any(status.has)) return;
+    s.settings.set('models.welcomed', 'yes');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const ModelsScreen(welcome: true)));
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final s = widget.services;
     final ant = s.ant;
@@ -980,7 +1005,7 @@ class _ModelsNudgeState extends State<_ModelsNudge> {
             return Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Downloading on-device models: ${(f * 100).round()}%', style: theme.textTheme.bodySmall),
+                Text('Downloading the models: ${(f * 100).round()}%', style: theme.textTheme.bodySmall),
                 const SizedBox(height: 6),
                 LinearProgressIndicator(value: f, minHeight: 3),
               ]),
@@ -995,11 +1020,11 @@ class _ModelsNudgeState extends State<_ModelsNudge> {
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Titles, tags and Clean up', style: theme.textTheme.titleSmall),
+                  Text('Transcripts, reading aloud, titles and search', style: theme.textTheme.titleSmall),
                   const SizedBox(height: 4),
                   Text(
-                    'Download the on-device models (${sizeLabel(status.missingBytes)}, once). They run on this phone; '
-                    'nothing you write is sent.',
+                    'Download the models (${sizeLabel(status.missingBytes)}, once). They run on this phone; '
+                    'nothing you record or write is sent.',
                     style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.4),
                   ),
                   Row(mainAxisAlignment: MainAxisAlignment.end, children: [

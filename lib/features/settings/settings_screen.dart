@@ -52,13 +52,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _Group('Smart notes', [
               _Row(
                 'On-device models',
-                value: status.downloads.isEmpty
-                    ? 'In the app'
-                    : status.missingBytes == 0
-                        ? 'All on this phone'
-                        : status.downloads.keys.any(status.has)
-                            ? '${status.downloads.keys.where(status.has).length} of ${status.downloads.length}'
-                            : 'Not downloaded',
+                value: () {
+                  final offered = [for (final g in modelGroups) if (g.offered(status).isNotEmpty) g];
+                  final ready = offered.where((g) => g.ready(status)).length;
+                  return offered.isEmpty
+                      ? 'In the app'
+                      : ready == offered.length
+                          ? 'All on this phone'
+                          : ready > 0
+                              ? '$ready of ${offered.length}'
+                              : 'Not downloaded';
+                }(),
                 onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const ModelsScreen())),
               ),
               _Switch('Title new notes', _s.autoEnabled('title'), (on) => setState(() => _s.setAutoEnabled('title', on))),
@@ -615,7 +619,7 @@ class _VoiceSheetState extends State<_VoiceSheet> {
                     if (custom.isEmpty)
                       Padding(
                         padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
-                        child: Text('Add a Phonon voice file you made (.safetensors).',
+                        child: Text('Add a voice file you made (.safetensors).',
                             style: theme.textTheme.bodySmall?.copyWith(color: muted)),
                       ),
                     for (final v in custom) voiceRow(v, custom: true),
