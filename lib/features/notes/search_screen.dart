@@ -42,15 +42,26 @@ class _SearchScreenState extends State<SearchScreen> {
   /// Word times beside each recording, read once.
   final _words = <String, Future<SpokenWords?>>{};
 
+  var _listening = false;
+
   @override
-  void initState() {
-    super.initState();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_listening) return;
+    _listening = true;
+    // The index finishing a pass (notes indexed, a model arrived): ask again, it may know more now.
+    _s.meaning.addListener(_indexChanged);
     if (widget.query.isNotEmpty) _searchMeaning();
+  }
+
+  void _indexChanged() {
+    if (_query.text.trim().isNotEmpty) _searchMeaning();
   }
 
   @override
   void dispose() {
     _meaningSoon?.cancel();
+    _s.meaning.removeListener(_indexChanged);
     _query.dispose();
     super.dispose();
   }
