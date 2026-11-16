@@ -4,8 +4,13 @@
 # The reading voice's JNI shim (cpp/ptts_jni.c) calls Listener.onAudio(float[]) by name.
 -keep interface app.notesapp.notes_app.PhononTts$Listener { boolean onAudio(float[]); }
 
-# LiteRT's Kotlin API (EmbeddingGemma 2): its JNI builds and calls its classes by name.
+# LiteRT's Kotlin API (EmbeddingGemma 2): its JNI builds and calls its classes by name. Its model-delivery classes
+# (never used) refer to the libraries left out in build.gradle.kts.
 -keep class com.google.ai.edge.litert.** { *; }
+-dontwarn com.google.android.play.core.aipacks.**
+-dontwarn com.google.android.play.**
+-dontwarn com.google.common.**
+-dontwarn kotlinx.coroutines.guava.**
 
 # The classes whose native methods are bound by name (Java_app_notesapp_notes_1app_<Class>_<method>).
 -keepclasseswithmembernames class app.notesapp.notes_app.** { native <methods>; }

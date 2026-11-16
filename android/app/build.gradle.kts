@@ -116,7 +116,13 @@ dependencies {
     implementation("ai.desertant:core:4.3.0")
     // EmbeddingGemma 2 (search by meaning, text and pictures): its graphs on the same LiteRT as Desert Ant's models,
     // through LiteRT's Kotlin API (its JNI opens the app's one libLiteRt.so); its model is downloaded.
-    implementation("com.google.ai.edge.litert:litert-api:2.3.2")
+    implementation("com.google.ai.edge.litert:litert-api:2.3.2") {
+        // Only CompiledModel is used: not LiteRT's model delivery through Play (ai-delivery brings WorkManager and
+        // Room, whose start-up provider crashed the app) nor the Guava futures only that delivery uses.
+        exclude(group = "com.google.android.play", module = "ai-delivery")
+        exclude(group = "com.google.guava")
+        exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-guava")
+    }
     implementation(fileTree("libs") { include("*.aar") })
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation("junit:junit:4.13.2")
