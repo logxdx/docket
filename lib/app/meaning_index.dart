@@ -80,7 +80,8 @@ class MeaningIndex extends ChangeNotifier {
 
   final _notes = <String, _NoteEntry>{};
   final _pictures = <String, _PictureEntry>{};
-  var _loaded = false;
+  /// The index being read from [file], once: whoever asks first starts it, everyone waits for the same read.
+  Future<void>? _loading;
   var _running = false;
   Timer? _later;
 
@@ -247,22 +248,25 @@ class MeaningIndex extends ChangeNotifier {
     );
   }
 
-  // How close a passage or a picture must be to count, and how far below the best one it may be. Passages: from
-  // EmbeddingGemma 2's scores with these prompts, where an unrelated note scores 0.52-0.69 and the one meant 0.69-0.78.
-  static const _passageFloor = 0.66, _passageMargin = 0.05;
-  static const _pictureFloor = 0.10, _pictureMargin = 0.06;
+  // How close a passage or a picture must be to count, and how far below the best one it may be: from EmbeddingGemma
+  // 2's scores with these prompts (on the phone), where what is meant scores 0.69-0.79 and the rest 0.48-0.66,
+  // pictures (against words) alike.
+  static const _passageFloor = 0.67, _passageMargin = 0.05;
+  static const _pictureFloor = 0.68, _pictureMargin = 0.06;
 
-  Future<void> _load() async {
+  Future<void> _load() {
     final now = _fileFor();
     if (_file?.path != now.path) {
       // Another vault: what was loaded is not its index.
       _file = now;
-      _loaded = false;
+      _loading = null;
       _notes.clear();
       _pictures.clear();
     }
-    if (_loaded) return;
-    _loaded = true;
+    return _loading ??= _readIndex();
+  }
+
+  Future<void> _readIndex() async {
     try {
       if (!await file.exists()) return;
       final j = jsonDecode(await file.readAsString()) as Map<String, Object?>;
