@@ -28,6 +28,8 @@ class Embedder(private val cacheDir: File) {
         idle = timer.schedule(IDLE_MS) { close() }
         engine?.let { if (loadedFrom == model) return it }
         close()
+        // LiteRT-LM refuses a cache folder that is not there yet.
+        cacheDir.mkdirs()
         val e = EmbeddingEngine(
             EmbeddingEngineConfig(
                 modelPath = model,
