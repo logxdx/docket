@@ -64,7 +64,7 @@ git -C "$src" -c user.name=docket -c user.email=docket@localhost am --quiet "${p
   mise run build:android-natives shared --abi "$abi"
 )
 
-rm -rf "$libs" && mkdir -p "$libs/jni/$abi"
+rm -f "$libs"/*-release.aar "$so" && mkdir -p "$libs/jni/$abi" # only its own files: the Mirage shim lives here too
 for model in "${models[@]}"; do
   aar="$src/packages/$model-kotlin/build/outputs/aar/$model-release.aar"
   # No natives in a model AAR: they are all in the shared library.

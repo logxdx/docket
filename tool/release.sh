@@ -26,6 +26,8 @@ python3 -I tool/stage_models.py
 
 printf '\n== Desert Ant models\n'
 tool/build_desert_ant.sh
+printf '\n== Mirage (picture tags)\n'
+tool/build_mirage_jni.sh
 
 printf '\n== APK %s (%s)\n' "$name" "$number"
 flutter build apk --release --split-per-abi --target-platform android-arm64 \

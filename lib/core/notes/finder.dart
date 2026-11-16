@@ -1,9 +1,11 @@
 /// Search across everything a note holds: its text, the moments of its recordings (by their transcripts, timed by
-/// the word times beside the audio), its pictures (by name, caption and the words around them) and its tasks;
-/// narrowed by kind, date, folder, tags and what a note has, and sorted. The query is Obsidian's search syntax
-/// (lib/core/notes/search.dart).
+/// the word times beside the audio), its pictures (by name, caption, the words around them and the tags Mirage
+/// gave them) and its tasks; narrowed by kind, date, folder, tags and what a note has, and sorted. The query is
+/// Obsidian's search syntax (lib/core/notes/search.dart). Search by meaning ([withMeaning]) adds what the words
+/// mean to what they match.
 library;
 
+import '../search/meaning.dart';
 import '../voice/recording.dart';
 import '../voice/spoken.dart';
 import 'notebook.dart';
@@ -141,6 +143,16 @@ List<({String name, String alt, String around})> picturesIn(String text) {
   return out;
 }
 
+/// Where a picture embedded as [name] in a note in [folder] may be, in the order looked: as written, beside the
+/// note, at the vault's top, then in the usual attachment folders (as Obsidian resolves an embed).
+List<String> picturePaths(String name, String folder) => <String>{
+      if (name.contains('/')) name,
+      if (folder.isNotEmpty) '$folder/$name',
+      name,
+      for (final dir in const ['attachments', 'Attachments', 'assets', 'images', 'Images']) '$dir/$name',
+      if (folder.isNotEmpty) for (final dir in const ['attachments', 'assets']) '$folder/$dir/$name',
+    }.toList();
+
 /// What [note] has, for the "has" filters.
 bool noteHas(Note note, Has h) => switch (h) {
       Has.recording => noteParts(note.text).any((p) => p is SpokenPart || p is AudioPart),
@@ -149,8 +161,12 @@ bool noteHas(Note note, Has h) => switch (h) {
       Has.links => note.links.isNotEmpty,
     };
 
-/// Everything [query] finds in [book], narrowed by [filters], as [Hit]s of the kind asked for.
-List<Hit> searchVault(Notebook book, String query, SearchFilters filters) {
+/// Mirage's tags of the picture [name] in a note, when it has them.
+typedef TagsOf = PictureTags? Function(Note note, String name);
+
+/// Everything [query] finds in [book], narrowed by [filters], as [Hit]s of the kind asked for. A picture also
+/// matches by its tags ([tagsOf]): words of what is in it, or written on it.
+List<Hit> searchVault(Notebook book, String query, SearchFilters filters, {TagsOf? tagsOf}) {
   final q = SearchQuery.parse(query);
   final words = q.hasWords;
   final candidates = [
@@ -177,7 +193,7 @@ List<Hit> searchVault(Notebook book, String query, SearchFilters filters) {
     if (kind == Kind.pictures || kind == Kind.all) {
       for (final p in picturesIn(n.text)) {
         final caption = p.alt.isNotEmpty ? p.alt : p.around;
-        if (words && !q.inText('${p.name} $caption')) continue;
+        if (words && !q.inText('${p.name} $caption ${tagsOf?.call(n, p.name)?.words ?? ''}')) continue;
         out.add(PictureHit(n, name: p.name, caption: caption));
       }
     }
@@ -194,7 +210,15 @@ List<Hit> searchVault(Notebook book, String query, SearchFilters filters) {
   final List<Hit> hits;
   switch (filters.kind) {
     case Kind.all || Kind.notes:
-      final matched = q.run(candidates);
+      final matched = [...q.run(candidates)];
+      // A note whose words do not match but whose pictures' tags do (a photo of a dog, searched for "dog").
+      if (words && tagsOf != null) {
+        final found = matched.toSet();
+        for (final n in candidates) {
+          if (found.contains(n)) continue;
+          if (picturesIn(n.text).any((p) => q.inText(tagsOf(n, p.name)?.words ?? ''))) matched.add(n);
+        }
+      }
       final order = filters.sort == SortBy.relevance ? matched : _sorted(matched, filters.sort);
       hits = [
         for (final n in order)
@@ -212,6 +236,94 @@ List<Hit> searchVault(Notebook book, String query, SearchFilters filters) {
       hits = [for (final n in notes) ...inside(n, filters.kind)];
   }
   return hits;
+}
+
+/// One thing found by meaning, as the index gives it (lib/app/meaning_index.dart): the note's path, what it is, its
+/// text; for a moment, where it starts in its transcript; for a picture, its name as embedded.
+typedef Meant = ({String note, String kind, String text, String? audio, String? transcript, int offset, String? picture});
+
+/// [hits] (keyword search's, for [filters]) with what search by meaning found merged in: [passages] (text and
+/// moments, best first) and [pictures] (best first), turned into hits of the kind asked for, narrowed by the same
+/// filters, and fused with the keyword hits by rank, so what both find comes first. Tasks are found by words only.
+List<Hit> withMeaning(Notebook book, List<Hit> hits, SearchFilters filters,
+    {required List<Meant> passages, required List<Meant> pictures}) {
+  if (passages.isEmpty && pictures.isEmpty) return hits;
+  Note? noteOf(Meant m) {
+    final n = book.byPath(m.note);
+    if (n == null || !_passes(n, filters)) return null;
+    if (!filters.archived && !book.notes.contains(n)) return null;
+    return n;
+  }
+
+  Hit? hitOf(Meant m) {
+    final n = noteOf(m);
+    if (n == null) return null;
+    return switch (m.kind) {
+      'moment' => MomentHit(n, audio: m.audio!, text: m.text, transcript: m.transcript ?? '', offset: m.offset),
+      'picture' => PictureHit(n, name: m.picture!, caption: _captionOf(n, m.picture!) ?? m.text),
+      _ => NoteHit(n, snippet: m.text),
+    };
+  }
+
+  Object key(Hit h) => switch (h) {
+        NoteHit(:final note) => 'n|${note.path}',
+        MomentHit(:final note, :final audio, :final offset) => 'm|${note.path}|$audio|$offset',
+        PictureHit(:final note, :final name) => 'p|${note.path}|$name',
+        TaskHit(:final note, :final text) => 't|${note.path}|$text',
+      };
+
+  final List<Hit> fused;
+  switch (filters.kind) {
+    case Kind.tasks:
+      return hits;
+    case Kind.recordings:
+      final meant = [for (final m in passages) if (m.kind == 'moment') ?hitOf(m)];
+      // A keyword moment inside a meaning moment is the same moment: the keyword one (its line) stands for both.
+      final kept = [
+        for (final m in meant.cast<MomentHit>())
+          hits.whereType<MomentHit>().firstWhere(
+                (k) => k.note.path == m.note.path && k.audio == m.audio && k.offset >= m.offset && k.offset < m.offset + m.text.length + 64,
+                orElse: () => m,
+              ),
+      ];
+      fused = fuse([hits, kept], key);
+    case Kind.pictures:
+      fused = fuse([hits, [for (final m in pictures) ?hitOf(m)]], key);
+    case Kind.all || Kind.notes:
+      // Notes, each at the rank of the best thing meaning found in it; when searching everything, that thing is shown
+      // inside it, as keyword search shows what matched.
+      final best = <String, Hit>{};
+      for (final m in fuse([passages, pictures], (m) => '${m.note}|${m.kind}|${m.offset}|${m.picture}')) {
+        final h = hitOf(m);
+        if (h != null) best.putIfAbsent(m.note, () => h);
+      }
+      final keywordNotes = {for (final h in hits.whereType<NoteHit>()) h.note.path: h};
+      final meantNotes = [
+        for (final MapEntry(key: path, value: h) in best.entries)
+          keywordNotes[path] ??
+              NoteHit(
+                h.note,
+                snippet: h is NoteHit ? h.snippet : (h is MomentHit ? h.text : (h as PictureHit).caption),
+                inside: filters.kind == Kind.all && h is! NoteHit ? [h] : const [],
+              ),
+      ];
+      fused = fuse([hits, meantNotes], key);
+  }
+  return filters.sort == SortBy.relevance ? fused : _sortedHits(fused, filters.sort);
+}
+
+/// A picture's caption in [n]: its alt text, else the words next to it.
+String? _captionOf(Note n, String name) {
+  for (final p in picturesIn(n.text)) {
+    if (p.name == name) return p.alt.isNotEmpty ? p.alt : p.around;
+  }
+  return null;
+}
+
+/// [hits] in the order [by] puts their notes (a note's own hits keep their order).
+List<Hit> _sortedHits(List<Hit> hits, SortBy by) {
+  final order = {for (final (i, n) in _sorted({for (final h in hits) h.note}.toList(), by).indexed) n.path: i};
+  return [...hits]..sort((a, b) => order[a.note.path]!.compareTo(order[b.note.path]!));
 }
 
 bool _passes(Note n, SearchFilters f) {

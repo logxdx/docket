@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:notes_app/core/notes/finder.dart';
 import 'package:notes_app/core/notes/notebook.dart';
 import 'package:notes_app/core/notes/vault.dart';
+import 'package:notes_app/core/search/meaning.dart';
+import 'package:notes_app/core/voice/recording.dart';
 import 'package:notes_app/core/voice/spoken.dart';
 
 void main() {
@@ -81,5 +83,63 @@ void main() {
     expect(searchVault(book, '', const SearchFilters(sort: SortBy.title)).map((h) => h.note.title), ['Ideas', 'Standup', 'Trip']);
     // Operators still narrow: tag: and a property.
     expect(searchVault(book, 'tag:#travel passport', const SearchFilters(kind: Kind.tasks)).cast<TaskHit>().single.text, 'passport');
+  });
+
+  PictureTags? tags(Note n, String name) =>
+      name == 'harbour.jpg' ? const PictureTags(objects: ['boat', 'water'], text: ['MARINA'], summary: 'boats moored in a harbour') : null;
+
+  test("pictures are found by their tags too: what is in them and what is written on them", () {
+    final pictures = searchVault(book, 'boat', const SearchFilters(kind: Kind.pictures), tagsOf: tags).cast<PictureHit>();
+    expect(pictures.single.name, 'harbour.jpg');
+    // Searching everything, the note holding the picture comes up, though its own words do not match.
+    final all = searchVault(book, 'marina', const SearchFilters(), tagsOf: tags);
+    expect(all.single.note.title, 'Trip');
+    // Without the tags, nothing.
+    expect(searchVault(book, 'boat', const SearchFilters(kind: Kind.pictures)), isEmpty);
+  });
+
+  Meant meant(String note, String kind, String text, {String? audio, String? transcript, int offset = 0, String? picture}) =>
+      (note: note, kind: kind, text: text, audio: audio, transcript: transcript, offset: offset, picture: picture);
+
+  test('what meaning finds is merged in: notes the words missed, moments and pictures, the filters still apply', () {
+    final transcript = noteParts(book.byPath('Work/Standup.md')!.text).whereType<SpokenPart>().single.text;
+    final offset = transcript.indexOf('The budget');
+    final passages = [
+      meant('Ideas.md', 'text', 'A budget app idea'),
+      meant('Work/Standup.md', 'moment', 'The budget for the launch is forty thousand.',
+          audio: 'Recording 1.m4a', transcript: transcript, offset: offset),
+      meant('Archive/Old.md', 'text', 'An old budget note'),
+    ];
+    final pictures = [meant('Work/Trip.md', 'picture', 'boats moored', picture: 'harbour.jpg')];
+
+    // Everything: the words found nothing for "money", meaning found three notes (one of them by its picture); the
+    // archived one only with archived notes asked for.
+    final words = searchVault(book, 'money', const SearchFilters());
+    expect(words, isEmpty);
+    final all = withMeaning(book, words, const SearchFilters(), passages: passages, pictures: pictures);
+    expect(all.map((h) => h.note.title), unorderedEquals(['Ideas', 'Standup', 'Trip']));
+    expect(withMeaning(book, words, const SearchFilters(archived: true), passages: passages, pictures: pictures).map((h) => h.note.title),
+        contains('Old'));
+    final standup = all.whereType<NoteHit>().firstWhere((h) => h.note.title == 'Standup');
+    expect(standup.inside.single, isA<MomentHit>());
+
+    // A folder narrows meaning's hits as it does the words'.
+    final work = withMeaning(book, const [], const SearchFilters(folder: 'Work'), passages: passages, pictures: pictures);
+    expect(work.map((h) => h.note.title), unorderedEquals(['Standup', 'Trip']));
+
+    // Recordings: the moment, playable from where it starts; the same moment found by words is shown once.
+    final kw = searchVault(book, 'budget', const SearchFilters(kind: Kind.recordings));
+    final moments = withMeaning(book, kw, const SearchFilters(kind: Kind.recordings), passages: passages, pictures: pictures)
+        .cast<MomentHit>();
+    expect(moments.single.text, 'The budget for the launch is forty thousand.');
+
+    // Pictures: the picture, with its caption.
+    final pics = withMeaning(book, const [], const SearchFilters(kind: Kind.pictures), passages: passages, pictures: pictures)
+        .cast<PictureHit>();
+    expect(pics.single.name, 'harbour.jpg');
+    expect(pics.single.caption, 'The view from the hotel:');
+
+    // Tasks are found by words only.
+    expect(withMeaning(book, const [], const SearchFilters(kind: Kind.tasks), passages: passages, pictures: pictures), isEmpty);
   });
 }

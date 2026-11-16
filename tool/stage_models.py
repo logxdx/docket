@@ -3,11 +3,11 @@
 extra disk), and a manifest.json the app reads. Two lists:
 
 - "models": carried by the APK (Fermion Research's Phonon models: the recognizer and the voice);
-- "downloads": the Desert Ant models, left out to keep the APK small; the app fetches them from
-  Hugging Face when the user asks (Settings › On-device models), each file from the revision pinned
-  here and kept only when its size and sha256 match.
+- "downloads": every other model (Desert Ant's, Mirage, EmbeddingGemma 2), left out to keep the APK
+  small; the app fetches them from Hugging Face when the user asks (Settings › On-device models), each
+  file from the revision pinned here and kept only when its size and sha256 match.
 
-    python3 -I tool/stage_models.py                 # Desert Ant models as downloads
+    python3 -I tool/stage_models.py                 # all but Phonon's as downloads
     python3 -I tool/stage_models.py --bundle title  # carry Title in the APK too
 """
 import json
@@ -28,7 +28,8 @@ shutil.rmtree(dst, ignore_errors=True)
 os.makedirs(dst)
 kept, downloads, total, later = {}, {}, 0, 0
 for model_id, model in manifest["models"].items():
-    if model["repo"].startswith("desert-ant-labs/") and model_id not in bundle:
+    # Phonon's models (speech recognition, the reading voice) ride in the APK; every other one is downloaded.
+    if not model_id.startswith("phonon") and model_id not in bundle:
         downloads[model_id] = model
         later += sum(f["size"] for f in model["files"])
         continue

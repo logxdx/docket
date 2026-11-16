@@ -1,9 +1,13 @@
 /// Search: words (in Obsidian's syntax) found in notes, in the moments of recordings (played from there), in
-/// pictures' names and captions and in tasks; narrowed by kind, date, folder, tags and what a note has, and sorted.
+/// pictures' names, captions and tags and in tasks, and what the words mean found in the same (on the phone, with
+/// EmbeddingGemma 2, when it is downloaded); narrowed by kind, date, folder, tags and what a note has, and sorted.
 library;
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../app/meaning_index.dart';
 import '../../app/services.dart';
 import '../../app/theme.dart';
 import '../../core/notes/finder.dart';
@@ -23,8 +27,14 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   late final _query = TextEditingController(text: widget.query);
-  late final Notebook _book = ServicesScope.of(context).notebook;
+  late final Services _s = ServicesScope.of(context);
+  late final Notebook _book = _s.notebook;
   var _filters = const SearchFilters();
+
+  /// What search by meaning found for [_meantFor]: passages (text, moments) and pictures, best first.
+  List<Meant> _meantPassages = const [], _meantPictures = const [];
+  String _meantFor = '';
+  Timer? _meaningSoon;
 
   /// The date filter as chosen, for its chip.
   String _dates = 'Any time';
@@ -33,9 +43,40 @@ class _SearchScreenState extends State<SearchScreen> {
   final _words = <String, Future<SpokenWords?>>{};
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.query.isNotEmpty) _searchMeaning();
+  }
+
+  @override
   void dispose() {
+    _meaningSoon?.cancel();
     _query.dispose();
     super.dispose();
+  }
+
+  /// Search by meaning for what is typed, once typing pauses; the words' hits show meanwhile.
+  void _searchMeaning() {
+    _meaningSoon?.cancel();
+    _meaningSoon = Timer(const Duration(milliseconds: 350), () async {
+      final query = _query.text;
+      final found = await _s.meaning.search(query);
+      if (!mounted || query != _query.text) return;
+      Meant meant(MeaningHit h) => (
+            note: h.note,
+            kind: h.kind.name,
+            text: h.text,
+            audio: h.audio,
+            transcript: h.transcript,
+            offset: h.offset,
+            picture: h.picture,
+          );
+      setState(() {
+        _meantFor = query;
+        _meantPassages = [for (final h in found.passages) meant(h)];
+        _meantPictures = [for (final h in found.pictures) meant(h)];
+      });
+    });
   }
 
   Future<SpokenWords?> _wordsOf(Note note, String audio) {
@@ -210,7 +251,10 @@ class _SearchScreenState extends State<SearchScreen> {
           controller: _query,
           autofocus: widget.query.isEmpty,
           textInputAction: TextInputAction.search,
-          onChanged: (_) => setState(() {}),
+          onChanged: (_) {
+            setState(() {});
+            _searchMeaning();
+          },
           decoration: InputDecoration(
             hintText: 'Search notes, recordings, pictures, tasks',
             border: InputBorder.none,
@@ -219,14 +263,25 @@ class _SearchScreenState extends State<SearchScreen> {
             filled: false,
             suffixIcon: _query.text.isEmpty
                 ? null
-                : IconButton(tooltip: 'Clear', icon: const Icon(Icons.close_rounded), onPressed: () => setState(_query.clear)),
+                : IconButton(
+                    tooltip: 'Clear',
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => setState(() {
+                      _query.clear();
+                      _meantFor = '';
+                    }),
+                  ),
           ),
         ),
       ),
       body: ListenableBuilder(
-        listenable: _book,
+        listenable: Listenable.merge([_book, _s.meaning]),
         builder: (context, _) {
-          final hits = searchVault(_book, _query.text, _filters);
+          final words = searchVault(_book, _query.text, _filters, tagsOf: _s.meaning.tagsOf);
+          final meant = _meantFor.isNotEmpty && _meantFor == _query.text;
+          final hits = meant
+              ? withMeaning(_book, words, _filters, passages: _meantPassages, pictures: _meantPictures)
+              : words;
           final chip = theme.textTheme.labelLarge;
           Widget filter(String label, bool on, VoidCallback onTap) => Padding(
                 padding: const EdgeInsets.only(right: 8),
@@ -285,8 +340,17 @@ class _SearchScreenState extends State<SearchScreen> {
               padding: const EdgeInsets.fromLTRB(20, 4, 20, 4),
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: Text('${hits.length} ${hits.length == 1 ? 'result' : 'results'}',
-                    style: theme.textTheme.labelMedium?.copyWith(color: muted)),
+                child: ValueListenableBuilder<int>(
+                  valueListenable: _s.meaning.pending,
+                  builder: (context, indexing, _) => Text(
+                    [
+                      '${hits.length} ${hits.length == 1 ? 'result' : 'results'}',
+                      if (meant && hits.length > words.length) '${hits.length - words.length} by meaning',
+                      if (indexing > 0) 'indexing $indexing ${indexing == 1 ? 'note' : 'notes'} for search by meaning',
+                    ].join(' · '),
+                    style: theme.textTheme.labelMedium?.copyWith(color: muted),
+                  ),
+                ),
               ),
             ),
             Expanded(
@@ -295,8 +359,9 @@ class _SearchScreenState extends State<SearchScreen> {
                       child: Padding(
                         padding: const EdgeInsets.all(32),
                         child: Text(
-                          'Nothing found. Words search note text, recordings\' transcripts, pictures\' names and '
-                          'captions, and tasks; "phrases", -left out, OR, tag:#x and [property] work as in Obsidian.',
+                          'Nothing found. Words search note text, recordings\' transcripts, pictures\' names, '
+                          'captions and what is in them, and tasks; with EmbeddingGemma on the phone, what they mean '
+                          'is searched too. "phrases", -left out, OR, tag:#x and [property] work as in Obsidian.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: theme.colorScheme.outline),
                         ),

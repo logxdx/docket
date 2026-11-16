@@ -38,6 +38,7 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
     private val liveScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var live: LiveTranscriber? = null
     private val offline = OfflineModels(context)
+    private val embedder = Embedder(File(context.cacheDir, "embedder"))
     private val recorder = Recorder()
     private val sessions = ConcurrentHashMap<String, Session>()
     private val work = Mutex() // one heavy model job at a time: they share the CPU and memory
@@ -166,6 +167,24 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
             extras.release()
             offline.remove(id)
             status()
+        }
+
+        // Mirage's tags for a picture (hidden search terms: things in it, text read from it, a description), or null
+        // when Mirage is not on the phone.
+        "pictures.tag" -> withContext(Dispatchers.Default) {
+            val dir = offline.directory("mirage") ?: return@withContext null
+            MirageTagger.tag(dir, call.argument<ByteArray>("bytes")!!)
+        }
+
+        // EmbeddingGemma 2's vectors for search by meaning (texts carry their prompts; pictures as they are), or null
+        // when it is not on the phone.
+        "embed.texts" -> withContext(Dispatchers.Default) {
+            val dir = offline.directory("embeddinggemma") ?: return@withContext null
+            embedder.texts(dir, call.argument<List<String>>("texts")!!)
+        }
+        "embed.image" -> withContext(Dispatchers.Default) {
+            val dir = offline.directory("embeddinggemma") ?: return@withContext null
+            embedder.image(dir, call.argument<ByteArray>("bytes")!!)
         }
 
         // Microphone

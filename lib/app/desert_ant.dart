@@ -10,6 +10,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../core/search/meaning.dart';
 import '../core/voice/spoken.dart';
 
 /// What the phone has: the models copied into place, and the two ported ones.
@@ -142,6 +143,31 @@ class DesertAnt {
       );
 
   // Reading aloud (Phonon TTS, English)
+
+  // Search: picture tags (Mirage) and vectors (EmbeddingGemma 2)
+
+  /// Mirage's tags for the picture in [bytes]: the things in it, the text it read and a one-line description; null
+  /// when Mirage is not on the phone. Throws (PlatformException) when the picture cannot be read.
+  Future<PictureTags?> tagPicture(Uint8List bytes) async {
+    final m = await _call<Map>('pictures.tag', {'bytes': bytes});
+    if (m == null) return null;
+    return PictureTags(
+      objects: [...((m['objects'] as List?) ?? const []).cast<String>()],
+      text: [...((m['text'] as List?) ?? const []).cast<String>()],
+      summary: m['summary'] as String? ?? '',
+    );
+  }
+
+  /// EmbeddingGemma 2's vector for each of [texts] (each with its prompt, see lib/core/search/vectors.dart); null
+  /// when it is not on the phone.
+  Future<List<Float32List>?> embedTexts(List<String> texts) async {
+    if (texts.isEmpty) return const [];
+    final out = await _call<List>('embed.texts', {'texts': texts});
+    return out?.cast<Float32List>();
+  }
+
+  /// EmbeddingGemma 2's vector for the picture in [bytes]; null when it is not on the phone.
+  Future<Float32List?> embedImage(Uint8List bytes) => _call<Float32List>('embed.image', {'bytes': bytes});
 
   /// The user's own voices (valid Phonon voice files they added).
   Future<List<String>> customVoices() async => [...((await _call<List>('speech.custom')) ?? const []).cast<String>()];

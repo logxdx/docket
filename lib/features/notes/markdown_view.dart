@@ -11,6 +11,7 @@ import 'package:gpt_markdown/gpt_markdown.dart';
 import '../../app/safe_image.dart';
 import '../../app/theme.dart';
 import '../../core/notes/format.dart';
+import '../../core/notes/finder.dart';
 import '../../core/notes/notebook.dart';
 import '../../core/notes/obsidian.dart';
 import '../../core/notes/properties.dart';
@@ -265,14 +266,7 @@ class VaultImage extends StatelessWidget {
   final String? size;
 
   Future<Uint8List?> _load() async {
-    final candidates = <String>{
-      if (name.contains('/')) name,
-      if (folder.isNotEmpty) '$folder/$name',
-      name,
-      for (final dir in const ['attachments', 'Attachments', 'assets', 'images', 'Images']) '$dir/$name',
-      if (folder.isNotEmpty) for (final dir in const ['attachments', 'assets']) '$folder/$dir/$name',
-    };
-    for (final path in candidates) {
+    for (final path in picturePaths(name, folder)) {
       try {
         final bytes = await book.vault.readBytes(path);
         if (bytes != null) return bytes;

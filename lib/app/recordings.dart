@@ -115,6 +115,9 @@ class Recordings extends ChangeNotifier {
     if (!on) unawaited(_next());
   }
   RecordingJob? _running;
+
+  /// Whether a recording is being made or processed: background work (the search index) waits meanwhile.
+  bool get working => _running != null || _heldForRecording || _queue.isNotEmpty;
   final _stage = <String, Stage>{};
   final _fraction = <String, double>{};
   final _failed = <String, String>{};

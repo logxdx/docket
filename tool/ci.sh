@@ -28,6 +28,8 @@ flutter test
 
 step "Desert Ant's models, from its source and the patches"
 tool/build_desert_ant.sh
+step "Mirage's JNI shim, with Cactus's engine"
+tool/build_mirage_jni.sh
 
 step "Kotlin tests"
 # Flutter writes the Gradle wrapper (gitignored): a fresh checkout has none until it does.

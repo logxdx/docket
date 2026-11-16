@@ -85,6 +85,10 @@ val checkDesertAntLibs by tasks.registering {
                 throw GradleException("android/app/libs/$file is missing: run tool/build_desert_ant.sh")
             }
         }
+        // Mirage's shim (picture tags), built beside them.
+        if (!desertAntLibs.resolve("jni/arm64-v8a/libmirage_jni.so").isFile) {
+            throw GradleException("android/app/libs/jni/arm64-v8a/libmirage_jni.so is missing: run tool/build_mirage_jni.sh")
+        }
     }
 }
 tasks.named("preBuild") { dependsOn(checkDesertAntLibs) }
@@ -104,6 +108,8 @@ dependencies {
     // (LiteRT) from Maven; Clear, Ear, Who, Gist, Align and Title built from Desert Ant's source and Docket's
     // patches by tool/build_desert_ant.sh (tool/ci.sh and tool/release.sh run it), sharing one native library.
     implementation("ai.desertant:core:4.3.0")
+    // EmbeddingGemma 2 (search by meaning, text and pictures) runs on Google's LiteRT-LM; its model is downloaded.
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.19.1")
     implementation(fileTree("libs") { include("*.aar") })
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation("junit:junit:4.13.2")

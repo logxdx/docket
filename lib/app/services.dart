@@ -17,6 +17,7 @@ import '../core/notes/vault.dart';
 import '../core/voice/summaries.dart';
 import 'desert_ant.dart';
 import 'enricher.dart';
+import 'meaning_index.dart';
 import 'recordings.dart';
 import 'saf_vault.dart';
 import 'settings.dart';
@@ -159,6 +160,15 @@ class Services {
     enabled: autoEnabled,
   );
 
+  /// Search by meaning: notes, recordings' transcripts and pictures, kept up to date in the background
+  /// (lib/app/meaning_index.dart), one index per vault.
+  late final meaning = MeaningIndex(
+    notebook: notebook,
+    ant: ant,
+    file: () => File('${support.path}/meaning/${_vaultKey.isEmpty ? 'phone' : _vaultKey}.json'),
+    busy: () => recordings.working,
+  );
+
   /// Emoji, tags and titles for typed notes as they are saved.
   late final enricher = Enricher(notebook: notebook, ant: ant, enabled: autoEnabled);
 
@@ -171,6 +181,10 @@ class Services {
   Future<void> startModels() async {
     await ant.prepare();
     await recordings.resume();
+    // The search index follows the notes, and what a model downloaded adds.
+    notebook.addListener(meaning.schedule);
+    ant.status.addListener(meaning.schedule);
+    meaning.schedule(const Duration(seconds: 10));
   }
 
   Future<String> _summarise(String transcript) async {

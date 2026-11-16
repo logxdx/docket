@@ -20,6 +20,8 @@ const modelPurposes = <String, (String, String)>{
   'clear': ('Clear', 'Cleans audio'),
   'who': ('Who', 'Tells speakers apart'),
   'align': ('Align', 'Times each word'),
+  'embeddinggemma': ('EmbeddingGemma', 'Search by meaning'),
+  'mirage': ('Mirage', 'Tags pictures'),
 };
 
 String sizeLabel(int bytes) =>

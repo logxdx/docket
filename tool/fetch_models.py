@@ -53,6 +53,13 @@ MODELS = {
     "title": ("desert-ant-labs/title", "v0.1.0",
               ["config.json", "generation_config.json", "model.safetensors", "model.safetensors.index.json",
                "tokenizer.json", "tokenizer_config.json", "chat_template.jinja"]),
+    # Picture tags for search (Cactus Compute's Mirage, Apache-2.0): what is in a picture and the text it can read.
+    # Run by Cactus's engine, linked into libmirage_jni.so (tool/build_mirage_jni.sh). Pinned to the repo's commit.
+    "mirage": ("Cactus-Compute/mirage", "3d03cee88c0acbe4e71b94b567ab14e6e55f40c9", ["mirage.cact"]),
+    # Search by meaning (Google's EmbeddingGemma 2, Apache-2.0): text and pictures in one space, through LiteRT-LM.
+    # The CPU/GPU build of its text+vision encoders (int4 text, int8 vision). Pinned to the repo's commit.
+    "embeddinggemma": ("litert-community/embeddinggemma-2-text-vision-440m-litert-lm",
+                       "538e6574db281b4fe17993a3212f10c73bd678c6", ["embeddinggemma-2-text-vision-440m.litertlm"]),
 }
 
 
