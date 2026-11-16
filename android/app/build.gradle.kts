@@ -68,7 +68,13 @@ android {
 
 android {
     // Whatever a dependency carries for other ABIs (Desert Ant's and LiteRT's x86_64 libraries) stays out.
-    packaging { jniLibs { excludes += listOf("lib/x86_64/**", "lib/x86/**", "lib/armeabi-v7a/**") } }
+    packaging {
+        jniLibs {
+            excludes += listOf("lib/x86_64/**", "lib/x86/**", "lib/armeabi-v7a/**")
+            // LiteRT 2.3.2 comes with both ai.desertant:core and LiteRT's own package: the same file (one sha256).
+            pickFirsts += "lib/arm64-v8a/libLiteRt.so"
+        }
+    }
 }
 
 // Desert Ant's models are built from source, not kept in git (tool/build_desert_ant.sh): their Kotlin in
@@ -108,8 +114,9 @@ dependencies {
     // (LiteRT) from Maven; Clear, Ear, Who, Gist, Align and Title built from Desert Ant's source and Docket's
     // patches by tool/build_desert_ant.sh (tool/ci.sh and tool/release.sh run it), sharing one native library.
     implementation("ai.desertant:core:4.3.0")
-    // EmbeddingGemma 2 (search by meaning, text and pictures) runs on Google's LiteRT-LM; its model is downloaded.
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.19.1")
+    // EmbeddingGemma 2 (search by meaning, text and pictures): its graphs on the same LiteRT as Desert Ant's models,
+    // through LiteRT's Kotlin API (its JNI opens the app's one libLiteRt.so); its model is downloaded.
+    implementation("com.google.ai.edge.litert:litert-api:2.3.2")
     implementation(fileTree("libs") { include("*.aar") })
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation("junit:junit:4.13.2")

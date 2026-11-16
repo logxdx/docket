@@ -62,6 +62,27 @@ MODELS = {
                        "538e6574db281b4fe17993a3212f10c73bd678c6", ["embeddinggemma-2-text-vision-440m.litertlm"]),
 }
 
+# Files the app keeps cut into parts rather than whole: path -> its parts as (part path, first byte, end byte). The
+# app downloads the file once, front to back, writing each part where it goes (and nothing else: no second copy),
+# and checks the whole stream against the file's pinned sha256. EmbeddingGemma 2's LiteRT-LM container holds LiteRT
+# graphs whose weights are external: each graph goes in a folder with its weights beside it under their group's
+# name ('tflite_weights'), as plain LiteRT finds them (the shared libLiteRt.so runs them; Embedder.kt). The ranges
+# are the container's sections at the pinned revision (litert-lm peek).
+SPLITS = {
+    "embeddinggemma-2-text-vision-440m.litertlm": [
+        ("tokenizer.spm", 32768, 4721781),
+        ("embedder/model.tflite", 4734976, 7884056),
+        ("text_encoder/model.tflite", 7897088, 29147808),
+        ("vision_encoder/model.tflite", 29163520, 34368344),
+        ("vision_adapter/model.tflite", 34373632, 34385400),
+        ("end_of_vision.tflite", 34390016, 34392756),
+        ("embedder/tflite_weights", 34406400, 101515264),
+        ("text_encoder/tflite_weights", 101515264, 169869312),
+        ("vision_encoder/tflite_weights", 169869312, 386138112),
+        ("vision_adapter/tflite_weights", 386138112, 387710976),
+    ],
+}
+
 
 # Fermion Research's Phonon-2.5 speech recognizers (Parakeet-TDT derived, CC BY 4.0), as unpacked
 # folders: model.fermion + config.json. Copied from a local unpacked copy when there is one
@@ -265,7 +286,13 @@ def main():
                 raise SystemExit(f"error: {repo}@{revision} has no {f}")
             size, oid = listing[f]
             size_sum += size
-            entries.append({"path": f, "size": size, "sha256": oid})
+            entry = {"path": f, "size": size, "sha256": oid}
+            if f in SPLITS:
+                parts = SPLITS[f]
+                if any(e > size or b >= e for _, b, e in parts):
+                    raise SystemExit(f"error: {f}: a part lies outside the file")
+                entry["split"] = [{"path": part, "begin": b, "end": e} for part, b, e in parts]
+            entries.append(entry)
         total += size_sum
         print(f"{model_id:6} {repo}@{revision}: {size_sum / 1e6:7.1f} MB")
         manifest["models"][model_id] = {"repo": repo, "revision": revision, "files": entries}
@@ -282,6 +309,7 @@ def main():
             # check every file it is given (an imported model's too).
             if not e["sha256"]:
                 e["sha256"] = sha256(dest)
+
     for model_id, parts in MULTI.items():
         entry, size = fetch_multi_model(model_id, parts, root, only_list)
         total += size

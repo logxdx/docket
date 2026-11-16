@@ -21,6 +21,8 @@ import java.security.MessageDigest
  * A model's folder is handed to its SDK as `directory`; a folder the SDK finds already filled (and
  * without its own download bookkeeping) is used as-is. A model not in place is reported missing and
  * never constructed, so no SDK ever downloads on its own.
+ * A file the manifest gives a "split" (EmbeddingGemma 2's container) is kept as its parts only, each where the
+ * manifest says: written as it downloads, the whole stream checked against the file's sha256.
  */
 class OfflineModels(private val context: Context) {
     private val root = File(context.filesDir, "models")
@@ -55,8 +57,36 @@ class OfflineModels(private val context: Context) {
         return models.keys().asSequence().toList()
     }
 
-    /** How many bytes [id] takes, all its files together. */
-    fun sizeOf(id: String): Long = filesOf(id)?.sumOf { it.second } ?: 0L
+    /** How many bytes [id] takes to download, all its files together. */
+    fun sizeOf(id: String): Long = specsOf(id)?.sumOf { it.size } ?: 0L
+
+    /** A part of a file kept cut up: [path] in the model's folder, bytes [begin] to [end] of the file. */
+    private data class Part(val path: String, val begin: Long, val end: Long)
+
+    /** A file as the manifest pins it, and its parts when it is kept cut up. */
+    private data class Spec(val path: String, val size: Long, val sha256: String, val split: List<Part>)
+
+    private fun specsOf(id: String): List<Spec>? {
+        val model = bundled?.optJSONObject("models")?.optJSONObject(id)
+            ?: bundled?.optJSONObject("downloads")?.optJSONObject(id) ?: return null
+        val files = model.getJSONArray("files")
+        return (0 until files.length()).map {
+            val f = files.getJSONObject(it)
+            val split = f.optJSONArray("split")?.let { a ->
+                (0 until a.length()).map { i ->
+                    val p = a.getJSONObject(i)
+                    Part(p.getString("path"), p.getLong("begin"), p.getLong("end"))
+                }.sortedBy { p -> p.begin }
+            } ?: emptyList()
+            // A JSON null (no checksum pinned) is no checksum, not the text "null".
+            Spec(f.getString("path"), f.getLong("size"), if (f.isNull("sha256")) "" else f.optString("sha256"), split)
+        }
+    }
+
+    /** Whether [spec]'s file is in [dir] as kept: whole, or as all its parts. */
+    private fun present(dir: File, spec: Spec): Boolean =
+        if (spec.split.isEmpty()) File(dir, spec.path).length() == spec.size
+        else spec.split.all { File(dir, it.path).length() == it.end - it.begin }
 
     /** Cancelled downloads, by id: the download stops at its next block. */
     private val cancelled = java.util.Collections.synchronizedSet(HashSet<String>())
@@ -76,72 +106,127 @@ class OfflineModels(private val context: Context) {
             ?: throw IllegalArgumentException("$id is not a model to download")
         val repo = model.getString("repo")
         val revision = model.getString("revision")
-        val files = model.getJSONArray("files")
-        val specs = (0 until files.length()).map {
-            val f = files.getJSONObject(it)
-            // A JSON null (no checksum pinned) is no checksum, not the text "null".
-            Triple(f.getString("path"), f.getLong("size"), if (f.isNull("sha256")) "" else f.optString("sha256"))
-        }
-        val total = specs.sumOf { it.second }
+        val specs = specsOf(id)!!
+        val total = specs.sumOf { it.size }
         val dir = File(root, id)
         var done = 0L
         cancelled -= id
-        for ((path, size, sha256) in specs) {
-            val target = File(dir, path)
-            if (target.length() == size) {
-                done += size
+        for (spec in specs) {
+            if (present(dir, spec)) {
+                done += spec.size
                 progress(done, total)
                 continue
             }
-            target.parentFile?.mkdirs()
-            val part = File(target.path + ".part")
-            val digest = MessageDigest.getInstance("SHA-256")
-            var got = 0L
-            val connection = URL("https://huggingface.co/$repo/resolve/$revision/$path").openConnection() as HttpURLConnection
+            val connection = URL("https://huggingface.co/$repo/resolve/$revision/${spec.path}").openConnection() as HttpURLConnection
             connection.connectTimeout = 20_000
             connection.readTimeout = 60_000
             connection.instanceFollowRedirects = true
             try {
                 if (connection.responseCode !in 200..299) {
-                    throw IllegalStateException("Hugging Face answered ${connection.responseCode} for $id/$path.")
+                    throw IllegalStateException("Hugging Face answered ${connection.responseCode} for $id/${spec.path}.")
                 }
+                val base = done
                 connection.inputStream.use { input ->
-                    part.outputStream().use { out ->
-                        val buf = ByteArray(1 shl 20)
-                        while (true) {
-                            if (id in cancelled) throw InterruptedException("Download stopped.")
-                            val n = input.read(buf)
-                            if (n < 0) break
-                            out.write(buf, 0, n)
-                            digest.update(buf, 0, n)
-                            got += n
-                            progress(done + got, total)
-                            if (got > size) break
-                        }
+                    place(input, dir, spec, "$id/${spec.path}") { got ->
+                        if (id in cancelled) throw InterruptedException("Download stopped.")
+                        progress(base + got, total)
                     }
                 }
             } catch (e: java.net.UnknownHostException) {
-                part.delete()
                 throw IllegalStateException("No internet connection: the models come from Hugging Face. Try again when online.")
+            } catch (e: InterruptedException) {
+                throw IllegalStateException("Download stopped.")
             } catch (e: java.io.IOException) {
-                part.delete()
                 // A dropped connection keeps the files done so far: the next try goes on from there.
-                throw IllegalStateException(if (e.message?.contains("stopped") == true) "Download stopped." else "The download was cut off (${e.message}). Try again: it goes on where it stopped.")
-            } catch (e: Exception) {
-                part.delete()
-                throw e
+                throw IllegalStateException("The download was cut off (${e.message}). Try again: it goes on where it stopped.")
             } finally {
                 connection.disconnect()
             }
-            val sha = digest.digest().joinToString("") { "%02x".format(it) }
-            if (got != size || (sha256.isNotEmpty() && sha != sha256)) {
-                part.delete()
-                throw IllegalStateException("$id/$path did not come down whole (size or checksum differs). Try again.")
-            }
-            if (!part.renameTo(target)) throw IllegalStateException("could not place $id/$path")
-            done += size
+            done += spec.size
         }
         File(dir, ".dal-meta").deleteRecursively()
+    }
+
+    /**
+     * [input] (the whole of [spec]'s file) put in [dir]: as one file, or cut into its parts as it streams by. Kept
+     * only when its size and sha256 are the pinned ones; nothing half-written is left behind. [onBytes] gets the
+     * bytes read so far.
+     */
+    private fun place(input: java.io.InputStream, dir: File, spec: Spec, what: String, onBytes: (Long) -> Unit) {
+        val parts = spec.split.ifEmpty { listOf(Part(spec.path, 0, spec.size)) }
+        val temps = parts.map { File(dir, it.path + ".part").also { f -> f.parentFile?.mkdirs() } }
+        val digest = MessageDigest.getInstance("SHA-256")
+        var at = 0L
+        var i = 0
+        var out: java.io.OutputStream? = null
+        try {
+            val buf = ByteArray(1 shl 20)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                digest.update(buf, 0, n)
+                // Each byte goes to the part whose range holds it, if any (the container's own headers go nowhere).
+                var off = 0
+                while (off < n) {
+                    while (i < parts.size && at + off >= parts[i].end) {
+                        out?.close()
+                        out = null
+                        i++
+                    }
+                    if (i >= parts.size) break
+                    val p = parts[i]
+                    val pos = at + off
+                    if (pos < p.begin) {
+                        off += minOf((p.begin - pos), (n - off).toLong()).toInt()
+                        continue
+                    }
+                    val take = minOf(p.end - pos, (n - off).toLong()).toInt()
+                    if (out == null) out = temps[i].outputStream()
+                    out!!.write(buf, off, take)
+                    off += take
+                }
+                at += n
+                onBytes(at)
+                if (at > spec.size) break
+            }
+        } catch (e: Exception) {
+            out?.close()
+            temps.forEach { it.delete() }
+            throw e
+        } finally {
+            out?.close()
+        }
+        val sha = digest.digest().joinToString("") { "%02x".format(it) }
+        if (at != spec.size || (spec.sha256.isNotEmpty() && sha != spec.sha256)) {
+            temps.forEach { it.delete() }
+            throw IllegalStateException("$what did not come down whole (size or checksum differs). Try again.")
+        }
+        for ((p, t) in parts.zip(temps)) {
+            if (!t.renameTo(File(dir, p.path))) throw IllegalStateException("could not place ${p.path}")
+        }
+    }
+
+    /**
+     * A file kept cut up that is here whole (downloaded or pushed before it was kept in parts): cut up here, from its
+     * own bytes (its checksum checked again), and the whole copy let go.
+     */
+    private fun splitWhole(id: String) {
+        val dir = File(root, id)
+        for (spec in specsOf(id) ?: return) {
+            if (spec.split.isEmpty()) continue
+            val whole = File(dir, spec.path)
+            if (present(dir, spec)) {
+                whole.delete()
+                continue
+            }
+            if (whole.length() != spec.size) continue
+            try {
+                whole.inputStream().buffered(1 shl 20).use { place(it, dir, spec, "$id/${spec.path}") {} }
+                whole.delete()
+            } catch (e: Exception) {
+                android.util.Log.w("OfflineModels", "$id/${spec.path} not cut up: ${e.message}")
+            }
+        }
     }
 
     /** Take [id] (a downloaded model) off the phone. */
@@ -203,6 +288,8 @@ class OfflineModels(private val context: Context) {
             // SDK treat the folder as download-managed rather than as files we placed.
             File(dir, ".dal-meta").deleteRecursively()
         }
+        // Downloaded files now kept cut up: cut up here once, rather than downloaded again.
+        downloadIds().forEach(::splitWhole)
         // Models dropped from this build: their folders go (not those downloaded, which the APK no longer carries).
         val downloads = manifest.optJSONObject("downloads")
         root.listFiles()
@@ -213,7 +300,7 @@ class OfflineModels(private val context: Context) {
 
     private fun filesPresent(id: String): Boolean {
         val dir = File(root, id)
-        return filesOf(id)?.all { (path, size) -> File(dir, path).length() == size } ?: false
+        return specsOf(id)?.all { present(dir, it) } ?: false
     }
 
     private fun filesOf(id: String): List<Pair<String, Long>>? {
