@@ -213,7 +213,7 @@ class MeaningIndex extends ChangeNotifier {
     for (final MapEntry(key: note, value: e) in _notes.entries) {
       for (final p in e.passages) {
         final s = similarity(p.vector, q);
-        if (s < _passageFloor) continue;
+        if (s < _passageFloor - 0.2) continue;
         final c = p.chunk;
         passages.add(MeaningHit(
           note: note,
@@ -229,21 +229,27 @@ class MeaningIndex extends ChangeNotifier {
         final v = _pictures[path]?.vector;
         if (v == null) continue;
         final s = similarity(v, q);
-        if (s < _pictureFloor) continue;
+        if (s < _pictureFloor - 0.2) continue;
         pictures.add(MeaningHit(note: note, kind: MeaningKind.picture, score: s, text: _pictures[path]?.tags?.summary ?? '', picture: name));
       }
     }
     int best(MeaningHit a, MeaningHit b) => b.score.compareTo(a.score);
     passages.sort(best);
     pictures.sort(best);
+    debugPrint('MEANING "$query" passages ${[for (final h in passages.take(5)) '${h.score.toStringAsFixed(3)} ${h.note}']} '
+        'pictures ${[for (final h in pictures.take(6)) '${h.score.toStringAsFixed(3)} ${h.picture}']}');
     // Only what is near the best: a query far from everything finds little, not the least far.
     List<MeaningHit> near(List<MeaningHit> l, double margin) =>
         l.isEmpty ? l : l.where((h) => h.score >= l.first.score - margin).take(limit).toList();
-    return (passages: near(passages, _passageMargin), pictures: near(pictures, _pictureMargin));
+    return (
+      passages: near(passages.where((h) => h.score >= _passageFloor).toList(), _passageMargin),
+      pictures: near(pictures.where((h) => h.score >= _pictureFloor).toList(), _pictureMargin),
+    );
   }
 
-  // How close a passage or a picture must be to count, and how far below the best one it may be.
-  static const _passageFloor = 0.30, _passageMargin = 0.15;
+  // How close a passage or a picture must be to count, and how far below the best one it may be. Passages: from
+  // EmbeddingGemma 2's scores with these prompts, where an unrelated note scores 0.52-0.69 and the one meant 0.69-0.78.
+  static const _passageFloor = 0.66, _passageMargin = 0.05;
   static const _pictureFloor = 0.10, _pictureMargin = 0.06;
 
   Future<void> _load() async {
