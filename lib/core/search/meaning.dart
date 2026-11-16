@@ -4,6 +4,7 @@
 /// The index itself (lib/app/meaning_index.dart) runs the models and keeps the vectors.
 library;
 
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -157,6 +158,15 @@ Int8List quantize(Float32List v) {
     out[i] = (v[i] * 127).round().clamp(-127, 127);
   }
   return out;
+}
+
+/// [v] as text, to keep in JSON: its bytes in base64 (int8 components as the bytes they are).
+String encodeVector(Int8List v) => base64Encode(Uint8List.view(v.buffer, v.offsetInBytes, v.length));
+
+/// What [encodeVector] wrote.
+Int8List decodeVector(String text) {
+  final bytes = base64Decode(text);
+  return Int8List.view(bytes.buffer, bytes.offsetInBytes, bytes.length);
 }
 
 /// The cosine of a stored vector [a] and a query [q] (both normalized).

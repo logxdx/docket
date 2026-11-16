@@ -48,6 +48,14 @@ void main() {
     expect(similarity(quantize(q), q), closeTo(1, 0.02));
   });
 
+  test('stored vectors survive being written and read back, negative components included', () {
+    final v = Int8List.fromList([-127, -5, 0, 5, 127, -1]);
+    expect(decodeVector(encodeVector(v)), v);
+    // A view into a larger buffer (as quantize may hand out) is written as itself only.
+    final big = Int8List.fromList([9, 9, -3, 4, 9]);
+    expect(decodeVector(encodeVector(Int8List.sublistView(big, 2, 4))), [-3, 4]);
+  });
+
   test('fusing rankings brings up what both rank, and keeps each item once', () {
     final merged = fuse([
       ['a', 'b', 'c'],

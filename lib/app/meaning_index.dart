@@ -139,6 +139,9 @@ class MeaningIndex extends ChangeNotifier {
       final shown = {for (final e in _notes.values) ...e.pictures.values};
       _pictures.removeWhere((path, _) => !shown.contains(path));
       if (changed) await _save();
+    } on Object catch (e) {
+      // Not kept this time (the next pass tries again); never an error the app sees.
+      debugPrint('meaning index: not saved: $e');
     } finally {
       pending.value = 0;
       _running = false;
@@ -268,7 +271,7 @@ class MeaningIndex extends ChangeNotifier {
       for (final MapEntry(key: path, value: v) in ((j['pictures'] as Map?) ?? const {}).cast<String, Map>().entries) {
         _pictures[path] = _PictureEntry(
           tags: v['tags'] == null ? null : PictureTags.fromJson((v['tags'] as Map).cast<String, Object?>()),
-          vector: v['v'] == null ? null : Int8List.fromList(base64Decode(v['v'] as String)),
+          vector: v['v'] == null ? null : decodeVector(v['v'] as String),
         );
       }
       for (final MapEntry(key: path, value: v) in ((j['notes'] as Map?) ?? const {}).cast<String, Map>().entries) {
@@ -279,7 +282,7 @@ class MeaningIndex extends ChangeNotifier {
               _Passage(
                 Chunk(ChunkKind.values.byName(p['k'] as String), p['t'] as String,
                     audio: p['a'] as String?, transcript: p['tr'] as String?, offset: (p['o'] as num?)?.toInt() ?? 0),
-                Int8List.fromList(base64Decode(p['v'] as String)),
+                decodeVector(p['v'] as String),
               ),
           ],
           ((v['pictures'] as Map?) ?? const {}).cast<String, String>(),
@@ -308,7 +311,7 @@ class MeaningIndex extends ChangeNotifier {
                   if (p.chunk.audio != null) 'a': p.chunk.audio,
                   if (p.chunk.transcript != null) 'tr': p.chunk.transcript,
                   if (p.chunk.offset != 0) 'o': p.chunk.offset,
-                  'v': base64Encode(p.vector),
+                  'v': encodeVector(p.vector),
                 },
             ],
             'pictures': e.pictures,
@@ -316,7 +319,7 @@ class MeaningIndex extends ChangeNotifier {
       },
       'pictures': {
         for (final MapEntry(key: path, value: p) in _pictures.entries)
-          path: {if (p.tags != null) 'tags': p.tags!.toJson(), if (p.vector != null) 'v': base64Encode(p.vector!)},
+          path: {if (p.tags != null) 'tags': p.tags!.toJson(), if (p.vector != null) 'v': encodeVector(p.vector!)},
       },
     };
     await file.parent.create(recursive: true);
