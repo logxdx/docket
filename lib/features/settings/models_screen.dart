@@ -14,12 +14,12 @@ import '../../app/theme.dart';
 
 /// What each model is for, in the order shown.
 const modelPurposes = <String, (String, String)>{
-  'title': ('Title', 'Titles and descriptions for new notes and recordings'),
-  'gist': ('Gist', 'Topic tags for notes'),
-  'ear': ('Ear', 'Hears which language a recording is in'),
-  'clear': ('Clear', 'Cleans a recording\'s audio (Clean up)'),
-  'who': ('Who', 'Tells speakers apart (Clean up)'),
-  'align': ('Align', 'Times every word, to read along (Clean up)'),
+  'title': ('Title', 'Names notes'),
+  'gist': ('Gist', 'Tags topics'),
+  'ear': ('Ear', 'Detects language'),
+  'clear': ('Clear', 'Cleans audio'),
+  'who': ('Who', 'Tells speakers apart'),
+  'align': ('Align', 'Times each word'),
 };
 
 String sizeLabel(int bytes) =>
