@@ -58,9 +58,7 @@ class ModelsScreen extends StatelessWidget {
             final missing = status.missingBytes;
             return ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 32), children: [
               Text(
-                'Docket keeps its download small: these models come from Hugging Face when you want them, once, '
-                'then run on this phone with nothing sent anywhere. Without them notes are still saved and '
-                'transcribed; they add titles, tags and Clean up.',
+                'Downloaded once, then run on this phone.',
                 style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.45),
               ),
               const SizedBox(height: 16),

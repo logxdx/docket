@@ -9,6 +9,7 @@ import 'dart:io' show File;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../app/attachments.dart';
 import '../../app/safe_image.dart';
 import '../../app/services.dart';
 import '../../app/theme.dart';
@@ -390,33 +391,17 @@ class _NoteScreenState extends State<NoteScreen> {
     if (picked == null || !mounted) return;
     final note = _book.byPath(_path);
     final folder = services.attachmentsFolder.isEmpty ? (note?.folder ?? '') : services.attachmentsFolder;
-    final dot = picked.name.lastIndexOf('.');
-    final base = dot > 0 ? picked.name.substring(0, dot) : picked.name, ext = dot > 0 ? picked.name.substring(dot) : '';
-    var name = picked.name;
-    for (var n = 2; await _book.vault.locate(folder.isEmpty ? name : '$folder/$name') != null; n++) {
-      name = '$base $n$ext';
-    }
-    final mime = switch (ext.toLowerCase()) {
-      '.png' => 'image/png',
-      '.gif' => 'image/gif',
-      '.webp' => 'image/webp',
-      '.svg' => 'image/svg+xml',
-      '.m4a' || '.aac' => 'audio/mp4',
-      '.mp3' => 'audio/mpeg',
-      '.wav' => 'audio/wav',
-      '.ogg' || '.opus' => 'audio/ogg',
-      '.flac' => 'audio/flac',
-      '.webm' => 'audio/webm',
-      _ => audio ? 'audio/mp4' : 'image/jpeg',
-    };
+    final String name;
     try {
-      await _book.vault.attach(folder.isEmpty ? name : '$folder/$name', File(picked.path), mime);
+      name = await addAttachment(_book, folder: folder, source: File(picked.path), name: picked.name, audio: audio);
     } on Object catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('The ${audio ? 'audio' : 'picture'} could not be added: $e')));
       }
       return;
+    } finally {
+      unawaited(File(picked.path).delete().then((_) {}, onError: (_) {}));
     }
     await _insert('![[$name]]\n');
   }

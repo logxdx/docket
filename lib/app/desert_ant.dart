@@ -146,11 +146,22 @@ class DesertAnt {
   /// The user's own voices (valid Phonon voice files they added).
   Future<List<String>> customVoices() async => [...((await _call<List>('speech.custom')) ?? const []).cast<String>()];
 
-  /// Let the user pick a file; its temporary copy and its name, or null when they cancelled.
-  Future<({String path, String name})?> pickFile({String? mime}) async {
+  /// Let the user pick a file; its temporary copy and its name, or null when they cancelled. A file over
+  /// [maxBytes] (when given) is refused: a PlatformException saying it is too large.
+  Future<({String path, String name})?> pickFile({String? mime, int? maxBytes}) async {
     try {
-      final m = await _permissions.invokeMethod<Map>('pickFile', {'mime': ?mime});
+      final m = await _permissions.invokeMethod<Map>('pickFile', {'mime': ?mime, 'maxBytes': ?maxBytes});
       return m == null ? null : (path: m['path'] as String, name: m['name'] as String);
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  /// How long the sound file at [path] plays; null when Android cannot read it as one.
+  Future<Duration?> audioLength(String path) async {
+    try {
+      final ms = await _permissions.invokeMethod<int>('audioLength', {'path': path});
+      return ms == null ? null : Duration(milliseconds: ms);
     } on MissingPluginException {
       return null;
     }

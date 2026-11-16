@@ -29,6 +29,7 @@ import '../core/notes/properties.dart';
 import '../core/voice/recording.dart';
 import '../core/voice/spoken.dart';
 import '../core/voice/summaries.dart';
+import 'attachments.dart';
 import 'desert_ant.dart';
 
 /// The steps, as the note's card names them.
@@ -59,6 +60,13 @@ class RecordingJob {
 
   /// A note of its own (titled and tagged when done), or a section added to another note.
   final bool newNote;
+
+  /// An audio file the user added (kept in the app's folder as `<id>--<its name>`, [Recordings.importPathFor]),
+  /// rather than a recording's raw PCM: decoded as it is, and kept in the vault under its own name.
+  bool get imported => !raw.endsWith('.pcm');
+
+  /// The added file's own name.
+  String get importedName => raw.substring(raw.lastIndexOf('/') + 1).split('--').skip(1).join('--');
 
   Map<String, Object> toJson() =>
       {'id': id, 'raw': raw, 'when': when.toIso8601String(), 'ms': length.inMilliseconds, 'newNote': newNote};
@@ -128,6 +136,9 @@ class Recordings extends ChangeNotifier {
   /// The raw recording's new home in the app's folder, for [id].
   String rawPathFor(String id) => '${folder.path}/$id.pcm';
 
+  /// Where an audio file the user added ([name]) waits in the app's folder, for [id].
+  String importPathFor(String id, String name) => '${folder.path}/$id--$name';
+
   /// Pick up recordings an earlier run did not finish.
   Future<void> resume() async {
     try {
@@ -156,7 +167,14 @@ class Recordings extends ChangeNotifier {
   /// Try a failed one again.
   void retry(String id) {
     if (_running?.id == id || _queue.any((j) => j.id == id)) return;
-    final raw = rawPathFor(id);
+    var raw = rawPathFor(id);
+    if (!File(raw).existsSync()) {
+      // An added audio file rather than a recording.
+      final added = folder.existsSync()
+          ? folder.listSync().whereType<File>().where((f) => f.uri.pathSegments.last.startsWith('$id--')).firstOrNull
+          : null;
+      if (added != null) raw = added.path;
+    }
     final note = _holding(transcribingMarker(id));
     if (!File(raw).existsSync() || note == null) return;
     _failed.remove(id);
@@ -227,15 +245,22 @@ class Recordings extends ChangeNotifier {
     final dir = note.folder;
     final stamp = '${job.when.year}-${_two(job.when.month)}-${_two(job.when.day)} '
         '${_two(job.when.hour)}${_two(job.when.minute)}${_two(job.when.second)}';
-    final audioName = 'Recording $stamp.m4a';
-    final audioPath = dir.isEmpty ? audioName : '$dir/$audioName';
+    var audioName = 'Recording $stamp.m4a';
     final tmp = Directory.systemTemp.createTempSync('rec');
     try {
-      // 1. The audio, kept beside the note as recorded (Clean up cleans it, on request).
+      // 1. The audio, kept beside the note as recorded (Clean up cleans it, on request); an added file as it is,
+      // under its own name.
       _at(id, Stage.saving, 0);
-      final kept = '${tmp.path}/$audioName';
-      final prepared = await ant.prepareSession(id, job.raw, raw: true, out: kept, onProgress: (f) => _at(id, Stage.saving, f));
-      await notebook.vault.attach(audioPath, File(kept), 'audio/mp4');
+      final Prepared prepared;
+      if (job.imported) {
+        prepared = await ant.prepareSession(id, job.raw);
+        audioName = await addAttachment(notebook, folder: dir, source: File(job.raw), name: job.importedName, audio: true);
+      } else {
+        final kept = '${tmp.path}/$audioName';
+        prepared = await ant.prepareSession(id, job.raw, raw: true, out: kept, onProgress: (f) => _at(id, Stage.saving, f));
+        await notebook.vault.attach(dir.isEmpty ? audioName : '$dir/$audioName', File(kept), 'audio/mp4');
+      }
+      final audioPath = dir.isEmpty ? audioName : '$dir/$audioName';
       await _edit(id, (text) => _insertBeforeMarker(text, id, '![[$audioName]]'));
 
       // 2. The language, and the recognizer for it.

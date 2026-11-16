@@ -6,12 +6,18 @@
 /// trash.
 library;
 
-import 'package:flutter/material.dart';
+import 'dart:io';
 
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../../app/attachments.dart';
+import '../../app/recordings.dart';
 import '../../app/services.dart';
 import '../../app/theme.dart';
 import '../../core/notes/notebook.dart';
 import '../../core/notes/search.dart';
+import '../../core/voice/recording.dart';
 import '../settings/settings_screen.dart';
 import '../settings/settings_tiles.dart';
 import '../settings/models_screen.dart';
@@ -88,6 +94,67 @@ class _NotesScreenState extends State<NotesScreen> {
   Future<void> _new() async {
     final note = await _book.create('Untitled', folder: _flat ? '' : _folder);
     if (mounted) await _open(note, edit: true);
+  }
+
+  /// A picture or a sound from the phone ([mime]); null when cancelled or unreadable (said).
+  Future<({String path, String name})?> _pick(String mime) async {
+    try {
+      return await _s.ant.pickFile(mime: mime);
+    } on PlatformException catch (e) {
+      _say(e.message ?? 'That file could not be read.');
+      return null;
+    }
+  }
+
+  /// + Picture: a note holding a picture from the phone (copied into the attachments folder), opened to write
+  /// about it. It stays "Untitled" until written in: then it is titled and tagged like any note.
+  Future<void> _newPicture() async {
+    final picked = await _pick('image/*');
+    if (picked == null || !mounted) return;
+    final folder = _flat ? '' : _folder;
+    try {
+      final into = _s.attachmentsFolder.isEmpty ? folder : _s.attachmentsFolder;
+      final name = await addAttachment(_book, folder: into, source: File(picked.path), name: picked.name, audio: false);
+      final note = await _book.create('Untitled', folder: folder, text: '![[$name]]\n\n');
+      if (mounted) await _open(note, edit: true);
+    } on Object catch (e) {
+      _say('The picture could not be added: $e');
+    } finally {
+      await File(picked.path).delete().then((_) {}, onError: (_) {});
+    }
+  }
+
+  /// + Audio: a sound file from the phone made into a note as a recording is: kept as it is, transcribed, then
+  /// titled and tagged (in Recordings, like the recordings).
+  Future<void> _newAudio() async {
+    final picked = await _pick('audio/*');
+    if (picked == null || !mounted) return;
+    final length = await _s.ant.audioLength(picked.path);
+    if (length == null) {
+      await File(picked.path).delete().then((_) {}, onError: (_) {});
+      _say('That is not a sound file this phone can play.');
+      return;
+    }
+    final when = DateTime.now();
+    final id = summaryId(when);
+    // Its own name, without anything that would make a path of it.
+    final name = picked.name.replaceAll(RegExp(r'[/\\]'), ' ').replaceFirst(RegExp(r'^\.+'), '');
+    final raw = _s.recordings.importPathFor(id, name.isEmpty ? 'audio' : name);
+    try {
+      await _s.recordings.folder.create(recursive: true);
+      await File(picked.path).copy(raw);
+      await File(picked.path).delete().then((_) {}, onError: (_) {});
+      final note = await _book.create(
+        recordingTitle(when),
+        folder: 'Recordings',
+        text: recordingDraft(when: when, length: length, id: id),
+      );
+      _s.recordings.add(RecordingJob(id: id, raw: raw, when: when, length: length, newNote: true));
+      if (mounted) await _open(note);
+    } on Object catch (e) {
+      await File(raw).delete().then((_) {}, onError: (_) {});
+      _say('The audio could not be added: $e');
+    }
   }
 
   /// Ask for a name: a new folder's, or a new name for a note or folder.
@@ -500,8 +567,27 @@ class _NotesScreenState extends State<NotesScreen> {
           },
           child: Scaffold(
             appBar: _appBar(readOnly, shown),
-            floatingActionButton:
-                readOnly || _selecting ? null : FloatingActionButton(onPressed: _new, tooltip: 'New note', child: const Icon(Icons.add_rounded)),
+            // A note, or one straight from a picture or a sound file: one tap each.
+            floatingActionButton: readOnly || _selecting
+                ? null
+                : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.end, children: [
+                    for (final (tag, icon, tip, action) in [
+                      ('picture', Icons.image_outlined, 'Note from a picture', _newPicture),
+                      ('audio', Icons.audio_file_outlined, 'Note from an audio file', _newAudio),
+                    ]) ...[
+                      FloatingActionButton.small(
+                        heroTag: tag,
+                        onPressed: action,
+                        tooltip: tip,
+                        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                        foregroundColor: Theme.of(context).colorScheme.onSurface,
+                        child: Icon(icon),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    const SizedBox(height: 4),
+                    FloatingActionButton(heroTag: 'note', onPressed: _new, tooltip: 'New note', child: const Icon(Icons.add_rounded)),
+                  ]),
             body: Column(children: [
               // The first launch after an install: the on-device models are put in place once.
               ValueListenableBuilder<double?>(

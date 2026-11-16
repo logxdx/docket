@@ -11,7 +11,7 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private var askingMic: MethodChannel.Result? = null
     private var pickingFile: MethodChannel.Result? = null
-    private var pickingMany: MethodChannel.Result? = null
+    private var pickLimit: Long? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -31,10 +31,12 @@ class MainActivity : FlutterActivity() {
                         requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), MIC)
                     }
                 }
-                // A file the user picks (a voice of their own): copied into the cache; its path and name, or null.
+                // A file the user picks (a picture or a sound for a note, a voice of their own): copied into the
+                // cache; its path and name, or null. A file over maxBytes (when given) is refused, not cut short.
                 "pickFile" -> {
                     pickingFile?.success(null)
                     pickingFile = result
+                    pickLimit = call.argument<Number>("maxBytes")?.toLong()
                     // A kind of file when asked for ("image/*" for a picture to add to a note), else any.
                     val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
                         .setType(call.argument<String>("mime") ?: "*/*")
@@ -45,19 +47,22 @@ class MainActivity : FlutterActivity() {
                         result.error("pick", "No file picker on this phone", null)
                     }
                 }
-                // Files the user picks (a model to import: its files, or a .zip of them): references only, not copies.
-                "pickFiles" -> {
-                    pickingMany?.success(null)
-                    pickingMany = result
-                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
-                        .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-                    try {
-                        startActivityForResult(intent, PICK_MANY)
-                    } catch (e: Exception) {
-                        pickingMany = null
-                        result.error("pick", "No file picker on this phone", null)
+                // How long a sound file plays, in ms; null when it is not one Android can read.
+                "audioLength" -> Thread {
+                    val ms = try {
+                        android.media.MediaMetadataRetriever().run {
+                            try {
+                                setDataSource(call.argument<String>("path"))
+                                extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+                            } finally {
+                                release()
+                            }
+                        }
+                    } catch (_: Exception) {
+                        null
                     }
-                }
+                    runOnUiThread { result.success(ms) }
+                }.start()
                 // A web link the user tapped (Settings: the Desert Ant Labs credit).
                 "open" -> {
                     val ok = try {
@@ -76,20 +81,6 @@ class MainActivity : FlutterActivity() {
     @Deprecated("Activity result API; FlutterActivity has no AndroidX registry")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == PICK_MANY) {
-            val many = pickingMany ?: return
-            pickingMany = null
-            if (resultCode != RESULT_OK || data == null) {
-                many.success(null)
-                return
-            }
-            val uris = buildList {
-                data.clipData?.let { clip -> for (i in 0 until clip.itemCount) add(clip.getItemAt(i).uri) }
-                if (isEmpty()) data.data?.let { add(it) }
-            }
-            many.success(uris.map { it.toString() })
-            return
-        }
         if (requestCode != PICK) return
         val result = pickingFile ?: return
         pickingFile = null
@@ -98,14 +89,15 @@ class MainActivity : FlutterActivity() {
             result.success(null)
             return
         }
+        val limit = pickLimit
         Thread {
             try {
-                var name = "voice"
+                var name = "file"
                 contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
                     if (it.moveToFirst()) name = it.getString(0) ?: name
                 }
                 val copy = java.io.File.createTempFile("picked", ".bin", cacheDir)
-                // A voice file is 256 KB; anything far bigger is not one, and is not copied whole.
+                var tooBig = false
                 contentResolver.openInputStream(uri)!!.use { input ->
                     copy.outputStream().use { out ->
                         val buf = ByteArray(1 shl 16)
@@ -114,12 +106,20 @@ class MainActivity : FlutterActivity() {
                             val n = input.read(buf)
                             if (n < 0) break
                             total += n
-                            if (total > 64L shl 20) break
+                            if (limit != null && total > limit) {
+                                tooBig = true
+                                break
+                            }
                             out.write(buf, 0, n)
                         }
                     }
                 }
-                runOnUiThread { result.success(mapOf("path" to copy.path, "name" to name)) }
+                if (tooBig) {
+                    copy.delete()
+                    runOnUiThread { result.error("pick", "That file is too large", null) }
+                } else {
+                    runOnUiThread { result.success(mapOf("path" to copy.path, "name" to name)) }
+                }
             } catch (e: Exception) {
                 runOnUiThread { result.error("pick", e.message ?: "The file could not be read", null) }
             }
@@ -137,6 +137,5 @@ class MainActivity : FlutterActivity() {
     private companion object {
         const val MIC = 7301
         const val PICK = 7302
-        const val PICK_MANY = 7303
     }
 }

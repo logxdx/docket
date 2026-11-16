@@ -466,7 +466,14 @@ class _VoiceSheetState extends State<_VoiceSheet> {
   Future<void> _add() async {
     final ant = widget.services.ant;
     setState(() => _problem = '');
-    final picked = await ant.pickFile();
+    final ({String path, String name})? picked;
+    try {
+      // A voice file is 256 KB: anything past 64 MB is not one.
+      picked = await ant.pickFile(maxBytes: 64 << 20);
+    } on PlatformException catch (e) {
+      if (mounted) setState(() => _problem = e.message ?? 'This file could not be read.');
+      return;
+    }
     if (picked == null || !mounted) return;
     final base = picked.name.replaceFirst(RegExp(r'\.safetensors$', caseSensitive: false), '');
     final name = await _askName('Name this voice', base);
