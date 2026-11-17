@@ -23,6 +23,18 @@ void main() {
     expect(note, '# Kickoff\n\n- Goals\n\n## Recording 09:05 · 1 min 5 s · Processing\n\n<!-- notes:transcribing k2 -->\n');
   });
 
+  test('a recording waiting for the STT model says so on its own line, and goes back to Processing', () {
+    var note = withRecording('# Kickoff', recordingDraftSection(when: when, length: const Duration(seconds: 65), id: 'k1'));
+    note = withRecording(note, recordingDraftSection(when: when, length: const Duration(seconds: 5), id: 'k2'));
+    note = recordingState(note, 'k2', recordingWaiting);
+    expect(note, contains('1 min 5 s · Processing\n\n<!-- notes:transcribing k1 -->'));
+    expect(note, contains('5 s · Waiting for the STT model\n\n<!-- notes:transcribing k2 -->'));
+    // Its audio between the line and the marker changes nothing.
+    final withAudio = note.replaceFirst('<!-- notes:transcribing k2 -->', '![[a.m4a]]\n\n<!-- notes:transcribing k2 -->');
+    expect(recordingState(withAudio, 'k2', recordingProcessing), contains('5 s · Processing\n\n![[a.m4a]]'));
+    expect(recordingState(note, 'gone', recordingWaiting), note);
+  });
+
   test('a finished recording: its audio, then its transcript, linked to it', () {
     const text = '# Standup\n\n3 min · #recording · English\n\n![[Recording 1.m4a]]\n\n<!-- notes:recording k1 -->\n\n'
         '## Transcript\n\n**Speaker 1** · 0:00\nHello.\n\n## Notes\nmine';

@@ -242,6 +242,14 @@ class Recordings extends ChangeNotifier {
     } on Object catch (error) {
       debugPrint('Recording ${job.id} failed: $error');
       _failed[job.id] = '$error';
+      // Its note says it waits, rather than that it is being processed.
+      if (error is SttMissing) {
+        try {
+          await _edit(job.id, (text) => recordingState(text, job.id, recordingWaiting));
+        } on Object {
+          // The note went away meanwhile.
+        }
+      }
     }
     _stage.remove(job.id);
     _fraction.remove(job.id);
@@ -274,6 +282,8 @@ class Recordings extends ChangeNotifier {
       // 1. The audio, kept beside the note as recorded (Clean up cleans it, on request); an added file as it is,
       // under its own name.
       _at(id, Stage.saving, 0);
+      // Tried again after waiting: the note says it is being processed once more.
+      if (note.text.contains(recordingWaiting)) await _edit(id, (text) => recordingState(text, id, recordingProcessing));
       final Prepared prepared;
       // Tried again (it waited for the STT model, say): its audio is in the note already.
       final saved = RegExp(r'!\[\[([^\]]+)\]\]\n\n' + RegExp.escape(transcribingMarker(id))).firstMatch(note.text)?[1];
@@ -599,12 +609,14 @@ String _insertBeforeMarker(String text, String id, String line) {
 String _fill(String text, String id, bool newNote, String info, String transcript, List<String> problems, String? summaryId) {
   final marker = transcribingMarker(id);
   if (!text.contains(marker)) return text;
+  // This recording's length line gets what was found.
+  text = recordingState(text, id, info.isEmpty ? '' : ' · $info');
   final heading = newNote ? '## Transcript' : '### Transcript';
   final body = transcript.isNotEmpty
       ? transcript
       : '> Nothing could be transcribed. ${problems.isEmpty ? 'No speech was found.' : problems.join(' ')}';
   final notes = transcript.isNotEmpty && problems.isNotEmpty ? '> ${problems.join(' ')}\n\n' : '';
-  final replaced = text.replaceFirst(
+  return text.replaceFirst(
     marker,
     [
       '<!-- notes:recording $id -->',
@@ -615,8 +627,23 @@ String _fill(String text, String id, bool newNote, String info, String transcrip
       '$notes$body',
     ].join('\n'),
   );
-  // The first "· Processing" (recordings are done in the order they were added) gets what was found.
-  return replaced.replaceFirst(' · Processing', info.isEmpty ? '' : ' · $info');
+}
+
+const recordingProcessing = ' · Processing';
+const recordingWaiting = ' · Waiting for the STT model';
+
+/// [text] with the state on [id]'s length line ("· Processing", or "· Waiting for the STT model": the last one
+/// above its marker) changed to [to].
+String recordingState(String text, String id, String to) {
+  final at = text.indexOf(transcribingMarker(id));
+  if (at < 0) return text;
+  final above = text.substring(0, at);
+  final processing = above.lastIndexOf(recordingProcessing);
+  final waiting = above.lastIndexOf(recordingWaiting);
+  final i = processing > waiting ? processing : waiting;
+  if (i < 0) return text;
+  final length = i == waiting ? recordingWaiting.length : recordingProcessing.length;
+  return text.substring(0, i) + to + text.substring(i + length);
 }
 
 /// The note a new recording starts as: its heading, its length line and the
