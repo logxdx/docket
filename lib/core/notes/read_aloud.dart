@@ -65,6 +65,10 @@ List<String> sentencesOf(String text) {
         .replaceAllMapped(RegExp(r'!?\[([^\]]*)\]\([^)]*\)'), (m) => m[1]!)
         .replaceAll(RegExp(r'(^|\s)#[\p{L}\p{N}_/-]+', unicode: true), ' ')
         .replaceAll(RegExp(r'\*\*|__|~~|`|(?<=\s|^)[*_]|[*_](?=\s|$)'), '')
+        // A dash between words reads as a colon: the voices run on through a dash, but stop at a colon. Hyphens
+        // inside words and dates ("noise-cancelling", "2026-11-16") stay.
+        .replaceAll(RegExp(r'\s*[—–―]\s*|\s+-{1,2}\s+|(?<=\S)--(?=\S)'), ': ')
+        .replaceAll(RegExp(r':\s*:'), ':')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
     if (!RegExp(r'[\p{L}\p{N}]', unicode: true).hasMatch(plain)) continue;

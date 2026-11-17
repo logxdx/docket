@@ -20,6 +20,14 @@ void main() {
     expect(sentencesOf('Version 3.5 is out. See e.g. the notes. Done?'), ['Version 3.5 is out.', 'See e.g. the notes.', 'Done?']);
   });
 
+  test('dashes between words are read as colons; hyphens in words and dates stay', () {
+    expect(sentencesOf('Groceries — milk and eggs.'), ['Groceries: milk and eggs.']);
+    expect(sentencesOf('Plan–budget first'), ['Plan: budget first']);
+    expect(sentencesOf('Call Anna - then the plumber -- or not.'), ['Call Anna: then the plumber: or not.']);
+    expect(sentencesOf('Note:— see below'), ['Note: see below']);
+    expect(sentencesOf('Noise-cancelling headphones on 2026-11-16.'), ['Noise-cancelling headphones on 2026-11-16.']);
+  });
+
   test('a very long sentence is cut at its commas', () {
     final long = '${List.filled(30, 'this part is long enough, ').join()}end.';
     final parts = sentencesOf(long);
