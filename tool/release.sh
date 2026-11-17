@@ -56,7 +56,7 @@ Docket $version for Android (arm64).
 
 - **docket-$version-arm64.apk**: the app. Its models are downloaded in the app from Hugging Face the
   first time it is opened (speech to text, reading aloud, and the notes models for titles, tags and search),
-  every file checked; everything runs on the phone.
+  every file checked, or Android's own speech is used instead; everything runs on the phone.
 - **SHA256SUMS**: its checksum.
 NOTES
   # The tag: made here when it is not there yet (a local run), never moved or forced.

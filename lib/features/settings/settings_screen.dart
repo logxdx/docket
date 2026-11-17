@@ -29,7 +29,7 @@ part 'speech_screen.dart';
 part 'what_docket_can_do.dart';
 
 /// The app's version, as pubspec.yaml has it.
-const appVersion = '0.3.0';
+const appVersion = '0.4.0';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
