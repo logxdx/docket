@@ -70,7 +70,7 @@ class _WhatDocketCanDo extends StatelessWidget {
             ]),
             Padding(
               padding: const EdgeInsets.fromLTRB(28, 14, 28, 0),
-              child: Text('Everything but the last runs on this phone; nothing you record or write is sent.',
+              child: Text('All but the last run on this phone.',
                   style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.45)),
             ),
           ]);

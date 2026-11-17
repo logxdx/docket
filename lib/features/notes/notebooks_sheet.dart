@@ -31,7 +31,7 @@ Future<void> showNotebooks(BuildContext context) async {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('Notebooks', style: theme.textTheme.titleLarge),
                 const SizedBox(height: 4),
-                Text('Folders of Markdown notes to switch between; each keeps its own recent notes and search.',
+                Text('Folders of notes to switch between.',
                     style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.4)),
               ]),
             ),

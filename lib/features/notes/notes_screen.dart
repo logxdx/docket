@@ -118,8 +118,7 @@ class _NotesScreenState extends State<NotesScreen> {
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Text(
-                'Everything new starts here. A picture becomes a note you can write about; an audio file is '
-                'transcribed, titled and tagged like a recording.',
+                'Pictures become notes. Audio files are transcribed.',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Theme.of(context).colorScheme.onInverseSurface,
                       height: 1.4,
@@ -582,7 +581,7 @@ class _NotesScreenState extends State<NotesScreen> {
                 const TipCard(
                   id: 'first-note',
                   title: 'Your first note',
-                  text: 'Tap the mic and talk: Docket writes it down. Or tap + to write, or add a picture or an audio file.',
+                  text: 'Tap the mic and talk, or + to write.',
                   margin: EdgeInsets.fromLTRB(16, 8, 16, 0),
                 ),
               if (_book.loading) const LinearProgressIndicator(minHeight: 2),

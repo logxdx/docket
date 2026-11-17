@@ -279,9 +279,8 @@ class _SpokenTranscriptState extends State<SpokenTranscript> with SingleTickerPr
           const TipCard(
             id: 'clean-up',
             title: 'Clean it up',
-            text: 'Tap the wand to take out the noise, mark who said what and time each word. Your original audio '
-                'is kept.',
-            more: 'Runs on this phone. Summarise and Tidy up need an AI server: Settings › AI.',
+            text: 'Tap the wand: less noise, who said what, word times.',
+            more: 'On this phone. Summarise and Tidy up need an AI server.',
             margin: EdgeInsets.only(top: 10),
           ),
         const SizedBox(height: 12),
@@ -351,8 +350,7 @@ class TranscribingCard extends StatelessWidget {
         ]),
         const SizedBox(height: 8),
         Text(
-          'Your recording is saved. To write it down, Docket needs the STT model. Once it is on the phone, this note '
-          'and any others waiting are transcribed by themselves.',
+          'Saved. Transcribed once the STT model is here.',
           style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.4),
         ),
         const SizedBox(height: 12),

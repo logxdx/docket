@@ -271,7 +271,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       context,
       children: [
         _heading(context, 'Where notes live',
-            'Plain Markdown files you can open, back up and sync with other apps. Change it any time.'),
+            'Plain Markdown files. Change it any time.'),
         Container(
           padding: const EdgeInsets.fromLTRB(18, 18, 10, 8),
           decoration: BoxDecoration(
@@ -318,8 +318,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               Text('Notes from before', style: theme.textTheme.titleSmall),
               const SizedBox(height: 4),
               Text(
-                'Documents › Docket has notes from an earlier install. Android keeps them from this one until you '
-                'allow access: pick the Docket folder and tap Use this folder.',
+                'Allow access to open notes from an earlier install.',
                 style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.4),
               ),
               Align(
@@ -352,12 +351,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         final status = _s.ant.status.value;
         final chosen = [for (final g in _missing) if (!_skip.contains(g.name)) g];
         final bytes = chosen.fold(0, (n, g) => n + g.missing(status));
-        final wifi = _s.downloads.mobileData == MobileData.allowed ? '' : ', over Wi-Fi. On mobile data, Docket asks first';
+        final wifi = _s.downloads.mobileData == MobileData.allowed ? '' : ', Wi-Fi only';
         return _page(
           context,
           children: [
             _heading(context, 'Download what Docket runs',
-                'Once, from Hugging Face. Then it all works offline. Change it any time in Settings.'),
+                'Once, then it all works offline. Change it in Settings.'),
             for (final g in _groups)
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
@@ -438,8 +437,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         ),
         const SizedBox(height: 8),
         _heading(context, 'AI on your notes',
-            'Summarise, Tidy up and recording summaries, from an AI server you choose. Only when you ask; everything '
-            'else stays on this phone.'),
+            'Summarise and Tidy up, from an AI server you choose. All else stays on this phone.'),
         field(_url, 'Address', 'http://192.168.1.20:8080/v1'),
         field(_model, 'Model', 'The server\'s own'),
         field(_key, 'API key', 'None needed', secret: true),
@@ -487,7 +485,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           back: false,
           children: [
             _heading(context, 'Downloading',
-                'Carries on while you use Docket. If the connection drops, it picks up where it stopped.'),
+                'Carries on while you use Docket.'),
             const DownloadNotice(padding: EdgeInsets.only(bottom: 12)),
             for (final g in shown)
               Container(
@@ -519,7 +517,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 Icon(Icons.info_outline_rounded, size: 18, color: muted),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text('Recording works already: notes are transcribed as soon as the STT model is in.',
+                  child: Text('Recording works already.',
                       style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.45)),
                 ),
               ]),

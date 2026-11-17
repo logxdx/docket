@@ -91,7 +91,7 @@ Future<bool?> askMobileData(BuildContext context, int bytes) async {
         icon: Icon(Icons.signal_cellular_alt_rounded, color: Accent.of(context)),
         title: const Text('Use mobile data?'),
         content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('You\'re not on Wi-Fi. The download is ${sizeLabel(bytes)}, which may count against your data plan.'),
+          Text('You\'re not on Wi-Fi. ${sizeLabel(bytes)} to download.'),
           const SizedBox(height: 8),
           CheckboxListTile(
             value: remember,
@@ -131,14 +131,14 @@ class DownloadNotice extends StatelessWidget {
           DownloadState.waitingForWifi => (
               Icons.wifi_rounded,
               'Waiting for Wi-Fi',
-              'The download starts by itself on Wi-Fi.',
+              'Starts by itself on Wi-Fi.',
               'Use mobile data',
               downloads.useMobileData,
             ),
           DownloadState.offline => (
               Icons.wifi_off_rounded,
               'No internet connection',
-              'The download picks up where it stopped, by itself when you are back online.',
+              'Resumes when you are back online.',
               'Retry',
               downloads.retry,
             ),
@@ -227,7 +227,7 @@ class ModelsScreen extends StatelessWidget {
               margin: const EdgeInsets.symmetric(vertical: 5),
               child: SwitchListTile(
                 title: const Text('Use mobile data'),
-                subtitle: const Text('Off: downloads wait for Wi-Fi, or ask first'),
+                subtitle: const Text('Otherwise Wi-Fi only'),
                 value: s.downloads.mobileData == MobileData.allowed,
                 onChanged: (on) => s.downloads.mobileData = on ? MobileData.allowed : MobileData.ask,
               ),
