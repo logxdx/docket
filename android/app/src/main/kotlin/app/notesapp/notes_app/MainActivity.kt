@@ -6,6 +6,8 @@ import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -36,6 +38,17 @@ class MainActivity : FlutterActivity() {
                 // Whether the microphone is allowed already, without asking (the primer comes before the asking).
                 "micGranted" -> result.success(
                     checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
+                )
+                // The shared Documents folder, where a fresh install keeps its notes (Documents/Docket), and whether a
+                // Docket folder is there already (left by an earlier install: Android hides its files until it is
+                // picked). Android 11+ lets an app keep its own files there without a permission; older ones: null.
+                "documents" -> result.success(
+                    if (Build.VERSION.SDK_INT >= 30) {
+                        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+                        mapOf("path" to dir.absolutePath, "docket" to java.io.File(dir, "Docket").exists())
+                    } else {
+                        null
+                    },
                 )
                 // The connection: online at all, and metered (mobile data) or not; downloads wait for Wi-Fi.
                 "network" -> {

@@ -3,8 +3,10 @@
 /// how the app looks.
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
@@ -24,15 +26,30 @@ import 'saf_vault.dart';
 import 'settings.dart';
 import 'theme.dart';
 
+/// A notebook: a folder of notes to switch to ([uri] '' for the home one), what it is called, and whether Docket
+/// leaves its files as they are.
+typedef NotebookPlace = ({String uri, String name, bool readOnly});
+
 class Services {
-  Services._(this.support, this.documents, this.settings, this._key);
+  Services._(this.support, this.documents, this.settings, this._key,
+      {required this.fresh, this.shared, this.foundOldNotes = false});
 
   /// The app's own folders: [support] for its index and settings,
-  /// [documents] for the notes kept on this phone (Notes/).
+  /// [documents] for the notes kept in the app (Notes/: installs from before Documents/Docket).
   final Directory support;
   final Directory documents;
   final Settings settings;
   String _key;
+
+  /// A fresh install: nothing was set when the app started.
+  final bool fresh;
+
+  /// The phone's shared Documents folder (Android 11+), where notes live by default (Documents/Docket).
+  final String? shared;
+
+  /// A fresh install found a Docket folder in Documents, left by an earlier install: Android hides its files from
+  /// this one until it is picked (the intro offers that).
+  final bool foundOldNotes;
 
   static const _secrets = FlutterSecureStorage();
 
@@ -46,8 +63,29 @@ class Services {
     } on Object {
       key = '';
     }
-    return Services._(support, documents, settings, key);
+    final fresh = settings.isEmpty;
+    Map<Object?, Object?>? shared;
+    try {
+      shared = await const MethodChannel('notes/permissions').invokeMethod<Map>('documents');
+    } on Object {
+      shared = null;
+    }
+    final path = shared?['path'] as String?;
+    // A fresh install keeps its notes in Documents/Docket, where the user and other apps can reach them.
+    if (fresh && path != null) settings.set('notes.home', 'documents');
+    return Services._(support, documents, settings, key,
+        fresh: fresh, shared: path, foundOldNotes: fresh && shared?['docket'] == true);
   }
+
+  /// Notes not in a picked folder: Documents/Docket, or the app's own folder (installs from before, and phones
+  /// older than Android 11).
+  bool get homeShared => settings.get('notes.home') == 'documents' && shared != null;
+
+  /// Where notes are kept when no folder is picked, as the user would name it.
+  String get homeLabel => homeShared ? 'Documents › Docket' : 'Docket\'s own folder';
+
+  /// Documents/Docket in the folder picker (picking it gives back the access a reinstall took).
+  static const sharedDocketUri = 'content://com.android.externalstorage.documents/document/primary%3ADocuments%2FDocket';
 
   late final appearance = Appearance(settings.get, settings.set);
 
@@ -87,7 +125,11 @@ class Services {
 
   Vault _vault() {
     final uri = settings.get('notes.vault') ?? '';
-    if (uri.isEmpty) return LocalVault(Directory('${documents.path}/Notes'), label: 'this phone');
+    if (uri.isEmpty) {
+      return homeShared
+          ? LocalVault(Directory('$shared/Docket'), label: homeLabel)
+          : LocalVault(Directory('${documents.path}/Notes'), label: 'this phone');
+    }
     final vault = SafVault(uri, label: settings.get('notes.vaultName') ?? 'Picked folder');
     return settings.get('notes.readOnly') == 'on' ? ReadOnlyVault(vault) : vault;
   }
@@ -98,24 +140,83 @@ class Services {
   /// Folders can be picked only on Android (the Storage Access Framework).
   bool get canPickFolder => Platform.isAndroid;
 
-  /// A folder the user picks, kept allowed across restarts; null when none.
-  Future<({String uri, String name})?> pickFolder({required bool write}) async {
+  /// A folder the user picks (the picker opening at [from] when given), kept allowed across restarts; null when none.
+  Future<({String uri, String name})?> pickFolder({required bool write, String? from}) async {
     if (!canPickFolder) return null;
-    final folder = await SafUtil().pickDirectory(writePermission: write, persistablePermission: true);
+    final folder =
+        await SafUtil().pickDirectory(initialUri: from, writePermission: write, persistablePermission: true);
     return folder == null ? null : (uri: folder.uri, name: folder.name);
   }
 
   /// Keep notes in [uri] (a picked folder), or in the app's own when null;
   /// [readOnly]: never change the folder's files.
   Future<void> useVault(String? uri, {String name = '', bool readOnly = false}) async {
-    final old = settings.get('notes.vault') ?? '';
-    // Android keeps a limited number of folder grants: the one left behind is handed back.
-    if (old.isNotEmpty && old != uri) await _release(old);
+    // A picked folder joins the notebooks (kept allowed, to come back to) until it is removed.
+    if (uri != null) {
+      _saveAdded([
+        for (final n in _added()) if (n.uri != uri) n,
+        (uri: uri, name: name, readOnly: readOnly),
+      ]);
+    }
     settings.set('notes.vault', uri ?? '');
     settings.set('notes.vaultName', name);
     settings.set('notes.readOnly', uri != null && readOnly ? 'on' : 'off');
     await notebook.use(_vault());
   }
+
+  /// Notebooks: folders of notes to switch between. First the home one (Documents › Docket, or the app's own
+  /// folder; uri ''), then the folders added, in the order they were.
+  List<NotebookPlace> get notebooks {
+    final added = _added();
+    // A folder picked before notebooks existed is one of them.
+    final current = settings.get('notes.vault') ?? '';
+    if (current.isNotEmpty && !added.any((n) => n.uri == current)) {
+      added.add((
+        uri: current,
+        name: settings.get('notes.vaultName') ?? 'Picked folder',
+        readOnly: settings.get('notes.readOnly') == 'on',
+      ));
+    }
+    return [(uri: '', name: homeLabel, readOnly: false), ...added];
+  }
+
+  /// The notebook open now ('' the home one).
+  String get currentNotebook => settings.get('notes.vault') ?? '';
+
+  Future<void> openNotebook(NotebookPlace n) =>
+      useVault(n.uri.isEmpty ? null : n.uri, name: n.name, readOnly: n.readOnly);
+
+  /// Take a folder off the notebooks (its files stay where they are); the home one opens if it was open.
+  Future<void> removeNotebook(String uri) async {
+    if (uri.isEmpty) return;
+    _saveAdded([for (final n in _added()) if (n.uri != uri) n]);
+    if (currentNotebook == uri) await useVault(null);
+    // Android keeps a limited number of folder grants: the one no longer used is handed back.
+    await _release(uri);
+  }
+
+  void renameNotebook(String uri, String name) {
+    if (uri.isEmpty || name.trim().isEmpty) return;
+    _saveAdded([for (final n in _added()) n.uri == uri ? (uri: uri, name: name.trim(), readOnly: n.readOnly) : n]);
+    if (currentNotebook == uri) {
+      settings.set('notes.vaultName', name.trim());
+      notebook.reopen(_vault());
+    }
+  }
+
+  List<NotebookPlace> _added() {
+    try {
+      return [
+        for (final m in jsonDecode(settings.get('notes.vaults') ?? '[]') as List)
+          (uri: '${m['uri']}', name: '${m['name']}', readOnly: m['readOnly'] == true),
+      ];
+    } on Object {
+      return [];
+    }
+  }
+
+  void _saveAdded(List<NotebookPlace> list) => settings.set(
+      'notes.vaults', jsonEncode([for (final n in list) {'uri': n.uri, 'name': n.name, 'readOnly': n.readOnly}]));
 
   Future<void> _release(String uri) async {
     try {
@@ -129,9 +230,20 @@ class Services {
     }
   }
 
-  /// Whether Android lets the app change the picked folder's files: not when it was picked to read only.
-  Future<bool> canWritePicked() async {
-    final uri = settings.get('notes.vault') ?? '';
+  /// Notebook [uri] read only (Docket changes none of its files), or editable again.
+  void setNotebookReadOnly(String uri, bool on) {
+    if (uri.isEmpty) return;
+    if (uri == currentNotebook) {
+      setNotesReadOnly(on);
+    } else {
+      _saveAdded([for (final n in _added()) n.uri == uri ? (uri: uri, name: n.name, readOnly: on) : n]);
+    }
+  }
+
+  /// Whether Android lets the app change a picked folder's files ([uri], else the one open): not when it was picked
+  /// to read only.
+  Future<bool> canWritePicked([String? uri]) async {
+    uri ??= settings.get('notes.vault') ?? '';
     if (uri.isEmpty) return true;
     try {
       return await SafUtil().hasPersistedPermission(uri, checkWrite: true);
@@ -143,6 +255,8 @@ class Services {
   /// Make the picked folder read only, or editable again.
   void setNotesReadOnly(bool on) {
     settings.set('notes.readOnly', on ? 'on' : 'off');
+    final uri = currentNotebook;
+    _saveAdded([for (final n in _added()) n.uri == uri ? (uri: uri, name: n.name, readOnly: on) : n]);
     notebook.reopen(_vault());
   }
 
@@ -206,7 +320,7 @@ class Services {
   }
 
   /// The intro: shown on a fresh install, and from Settings › Help. An update (settings already there) skips it.
-  bool get introDue => settings.isEmpty || (settings.get('intro.done') != 'yes' && settings.get('intro.started') == 'yes');
+  bool get introDue => fresh || (settings.get('intro.done') != 'yes' && settings.get('intro.started') == 'yes');
 
   void introDone() => settings.set('intro.done', 'yes');
 

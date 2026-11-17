@@ -1,4 +1,4 @@
-/// The intro, on a fresh install (and from Settings › Help › Replay the intro): what Docket is, where the notes
+/// The intro, on a fresh install (and from Settings › Help › Onboarding): what Docket is, where the notes
 /// live, what to download (all three preselected, over Wi-Fi), an AI server if wanted, then the downloads coming
 /// down while Docket is already usable. Every step can be skipped; nothing is asked twice.
 library;
@@ -30,9 +30,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   late final Services _s = ServicesScope.of(context);
   var _step = _Step.welcome;
 
-  // Where notes live: the app's own folder, or one picked (to change, or only to read).
-  late var _picked = _s.pickedVault;
-  late var _readOnly = _s.notebook.readOnly;
+  // Where notes live: Documents/Docket (or the app's own folder on older installs), until another is picked.
   var _picking = false;
 
   // What to download: every group not on the phone yet, until unticked.
@@ -75,18 +73,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         _Step.downloading => _Step.ai,
       });
 
-  Future<void> _locationDone() async {
-    if (_picked) {
-      setState(() => _picking = true);
-      final folder = await _s.pickFolder(write: !_readOnly);
-      if (!mounted) return;
-      setState(() => _picking = false);
-      if (folder == null) return; // cancelled: still choosing
-      await _s.useVault(folder.uri, name: folder.name, readOnly: _readOnly);
-    } else if (_s.pickedVault) {
-      await _s.useVault(null);
-    }
-    if (mounted) _go(_missing.isEmpty ? _Step.ai : _Step.models);
+  /// Notes in a folder the user picks instead (the picker opening at [from] when given); cancelled: as they were.
+  Future<void> _changeFolder({String? from}) async {
+    setState(() => _picking = true);
+    final folder = await _s.pickFolder(write: true, from: from);
+    if (!mounted) return;
+    setState(() => _picking = false);
+    if (folder == null) return;
+    await _s.useVault(folder.uri, name: folder.name);
+    if (mounted) setState(() {});
   }
 
   Future<void> _download() async {
@@ -269,77 +264,79 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final theme = Theme.of(context);
     final accent = Accent.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
-    Widget option({required bool on, required IconData icon, required String title, required String text, Widget? extra, required VoidCallback onTap}) =>
-        Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Material(
-            color: theme.colorScheme.surfaceContainer,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(22),
-              side: BorderSide(color: on ? accent : Colors.transparent, width: 2),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap: onTap,
-              child: Padding(
-                padding: const EdgeInsets.all(18),
-                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Icon(icon, color: on ? accent : muted),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(title, style: theme.textTheme.titleMedium),
-                      const SizedBox(height: 4),
-                      Text(text, style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.4)),
-                      ?extra,
-                    ]),
-                  ),
-                  Icon(on ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded, color: on ? accent : muted),
-                ]),
-              ),
-            ),
-          ),
-        );
+    final picked = _s.pickedVault;
+    // A reinstall: the last install's Docket folder is in Documents, its notes hidden until it is picked.
+    final old = _s.foundOldNotes && !picked;
     return _page(
       context,
       children: [
-        _heading(context, 'Where should notes live?', 'Plain Markdown files either way. You can change this later.'),
-        option(
-          on: !_picked,
-          icon: Icons.smartphone_rounded,
-          title: 'On this phone',
-          text: 'In Docket\'s own folder. Simplest; nothing to set up.',
-          onTap: () => setState(() => _picked = false),
+        _heading(context, 'Where notes live',
+            'Plain Markdown files you can open, back up and sync with other apps. Change it any time.'),
+        Container(
+          padding: const EdgeInsets.fromLTRB(18, 18, 10, 8),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainer,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: accent, width: 2),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(Icons.folder_rounded, color: accent),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(picked ? _s.notebook.vault.label : _s.homeLabel, style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 4),
+                  Text(
+                    picked
+                        ? 'The folder you picked'
+                        : _s.homeShared
+                            ? 'On this phone, in the Documents folder'
+                            : 'On this phone, inside the app',
+                    style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.4),
+                  ),
+                ]),
+              ),
+            ]),
+            if (_s.canPickFolder)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: _picking ? null : () => unawaited(_changeFolder()),
+                  icon: const Icon(Icons.drive_file_move_outlined),
+                  label: const Text('Change folder'),
+                ),
+              ),
+          ]),
         ),
-        if (_s.canPickFolder)
-          option(
-            on: _picked,
-            icon: Icons.folder_outlined,
-            title: 'A folder you choose',
-            text: 'Any folder on the phone or SD card, such as one another app syncs. Android\'s folder picker opens.',
-            extra: _picked
-                ? Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: MergeSemantics(
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(8),
-                        onTap: () => setState(() => _readOnly = !_readOnly),
-                        child: Row(children: [
-                          Checkbox(value: _readOnly, onChanged: (on) => setState(() => _readOnly = on ?? false)),
-                          Expanded(child: Text('Read only: look, search, never change it', style: theme.textTheme.bodyMedium)),
-                        ]),
-                      ),
-                    ),
-                  )
-                : null,
-            onTap: () => setState(() => _picked = true),
+        if (old && _s.canPickFolder)
+          Container(
+            margin: const EdgeInsets.only(top: 12),
+            padding: const EdgeInsets.fromLTRB(18, 16, 10, 6),
+            decoration: BoxDecoration(color: accent.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(18)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Notes from before', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 4),
+              Text(
+                'Documents › Docket has notes from an earlier install. Android keeps them from this one until you '
+                'allow access: pick the Docket folder and tap Use this folder.',
+                style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.4),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: _picking ? null : () => unawaited(_changeFolder(from: Services.sharedDocketUri)),
+                  child: const Text('Allow access'),
+                ),
+              ),
+            ]),
           ),
       ],
       buttons: [
         FilledButton(
           style: _big(context),
-          onPressed: _picking ? null : () => unawaited(_locationDone()),
-          child: Text(_picked ? 'Choose the folder' : 'Continue'),
+          onPressed: _picking ? null : () => _go(_missing.isEmpty ? _Step.ai : _Step.models),
+          child: const Text('Continue'),
         ),
       ],
       where: 'Step 2 of 4',

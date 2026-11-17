@@ -16,6 +16,7 @@ import '../../core/ai/model.dart';
 import '../../core/ai/prompts.dart';
 import '../../core/notes/read_aloud.dart' show readingVoiceRegions;
 import '../notes/note_screen.dart';
+import '../notes/notebooks_sheet.dart';
 import '../notes/record_screen.dart';
 import '../notes/search_screen.dart';
 import '../onboarding/onboarding_screen.dart';
@@ -78,6 +79,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _Row('Voice', value: '$_voice · ${_speedLabel(_speed)}', onTap: _pickVoice),
               ]),
             _Group('Notes', [
+              _Row('Notebooks',
+                  value: _s.pickedVault ? _s.notebook.vault.label : _s.homeLabel,
+                  onTap: () async {
+                    await showNotebooks(context);
+                    if (mounted) setState(() {});
+                  }),
               _Row('Daily notes',
                   value: _s.notebook.dailyFolder.isEmpty ? _s.notebook.dailyFormat : '${_s.notebook.dailyFolder}/${_s.notebook.dailyFormat}',
                   onTap: _dailySettings),
@@ -92,7 +99,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _Group('Help', [
               _Row('What Docket can do',
                   onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const _WhatDocketCanDo()))),
-              _Row('Replay the intro', onTap: () async {
+              _Row('Onboarding', onTap: () async {
                 await Navigator.push(
                     context, MaterialPageRoute<void>(builder: (_) => const OnboardingScreen(replay: true)));
                 if (mounted) setState(() {});

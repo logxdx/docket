@@ -76,11 +76,15 @@ one's Android files, pinned to the revision its SDK release (4.3.0) declares
 and checked against the Hub's SHA-256, into `.models/` (gitignored), and
 `tool/stage_models.py` lists them all as downloads: the APK carries no
 model (about 100 MB, nearly all native code). A fresh install opens on the
-intro (`lib/features/onboarding/`): what Docket is, where the notes live,
-three things to download (all preselected), an AI server if wanted, then the
-downloads coming down while the app is already usable. An update skips it;
-Settings › Help replays it, opens What Docket can do, and turns the one-time
-tips back on. Settings › On-device models has the same three downloads
+intro (`lib/features/onboarding/`): what Docket is, where the notes live
+(Documents › Docket on Android 11+, or a folder picked instead), three things
+to download (all preselected), an AI server if wanted, then the downloads
+coming down while the app is already usable. An update skips it (and keeps
+its notes where they were); Settings › Help › Onboarding shows it again, What
+Docket can do lists the features, and Show tips brings the one-time tips
+back. Notebooks (the title on the notes list, or Settings › Notes) switch
+between folders of notes: the home one and any folder added, to change or
+only to read, each with its own recent notes and search index. Settings › On-device models has the same three downloads
 later (and a card on the notes list until something is there):
 - **STT model** (about 420 MB): Phonon-2.5 and Phonon-2.5 English, Ear,
   Clear, Who and Align: recordings to text, and Clean up.

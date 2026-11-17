@@ -20,11 +20,11 @@ import '../../core/notes/notebook.dart';
 import '../../core/notes/search.dart';
 import '../../core/voice/recording.dart';
 import '../settings/settings_screen.dart';
-import '../settings/settings_tiles.dart';
 import '../settings/models_screen.dart';
 import '../onboarding/tips.dart';
 import 'graph_screen.dart';
 import 'navigation.dart';
+import 'notebooks_sheet.dart';
 import 'note_tools.dart';
 import 'note_screen.dart';
 import 'record_screen.dart';
@@ -370,8 +370,6 @@ class _NotesScreenState extends State<NotesScreen> {
         }
       case 'graph':
         await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const GraphScreen()));
-      case 'vault':
-        await _vault();
       case 'archive':
         await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const ArchiveScreen()));
       case 'trash':
@@ -384,113 +382,6 @@ class _NotesScreenState extends State<NotesScreen> {
     final note = await showQuickSwitcher(context, book: _book, recent: _s.recent);
     if (note != null && mounted) await _open(note);
   }
-
-  Future<void> _vault() async {
-    final services = _s;
-    final local = !services.pickedVault;
-    final readOnly = services.notebook.readOnly;
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 6, 20, 14),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Notes are in ${local ? 'this app' : services.notebook.vault.label}',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w500)),
-              const SizedBox(height: 4),
-              Text('Plain Markdown files in folders: [[links]], #tags, Daily/ and Archive/ like Obsidian.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant, height: 1.45)),
-            ]),
-          ),
-          if (!local) ...[
-            _hairline(context),
-            SettingsRow(
-              icon: Icons.lock_outline_rounded,
-              title: 'Read only',
-              subtitle: 'This app never changes these files.',
-              trailing: Switch(value: readOnly, onChanged: (on) => Navigator.pop(context, on ? 'lock' : 'unlock')),
-              onTap: () => Navigator.pop(context, readOnly ? 'unlock' : 'lock'),
-            ),
-          ],
-          if (services.canPickFolder) ...[
-            _hairline(context),
-            SettingsRow(
-              icon: Icons.folder_open_rounded,
-              title: 'Use a folder on this phone',
-              subtitle: 'Pick your Obsidian vault to edit the same notes in both apps',
-              chevron: false,
-              onTap: () => Navigator.pop(context, 'pick'),
-            ),
-            _hairline(context),
-            SettingsRow(
-              icon: Icons.menu_book_outlined,
-              title: 'Read notes from a folder',
-              subtitle: 'Read only: browse your own notes; nothing is changed',
-              chevron: false,
-              onTap: () => Navigator.pop(context, 'pick-read'),
-            ),
-          ],
-          if (!local) ...[
-            _hairline(context),
-            SettingsRow(
-              icon: Icons.home_outlined,
-              title: 'Back to this app\'s notes',
-              chevron: false,
-              onTap: () => Navigator.pop(context, 'local'),
-            ),
-          ],
-        ]),
-      ),
-    );
-    switch (choice) {
-      case 'pick' || 'pick-read':
-        final folder = await services.pickFolder(write: choice == 'pick');
-        if (folder != null) await services.useVault(folder.uri, name: folder.name, readOnly: choice == 'pick-read');
-        _go('');
-      case 'lock':
-        services.setNotesReadOnly(true);
-      case 'unlock':
-        await _unlock();
-      case 'local':
-        await services.useVault(null);
-        _go('');
-    }
-    if (mounted) setState(() {});
-  }
-
-  /// The picked folder made editable. A folder picked to read only was never allowed changes by Android: it is
-  /// picked again, allowing them.
-  Future<void> _unlock() async {
-    final services = _s;
-    if (await services.canWritePicked()) {
-      services.setNotesReadOnly(false);
-      return;
-    }
-    if (!mounted) return;
-    final again = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Allow changes'),
-        content: const Text('This folder was opened read only, so Android has not let Docket change its files. '
-            'Pick the same folder again and allow access.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Pick folder')),
-        ],
-      ),
-    );
-    if (again != true) return;
-    final folder = await services.pickFolder(write: true);
-    if (folder == null) return;
-    // The same folder, now writable; or another one, which is used instead.
-    await services.useVault(folder.uri, name: folder.name);
-    _go('');
-  }
-
-  static Widget _hairline(BuildContext context) =>
-      Divider(height: 1, thickness: 1, color: Theme.of(context).colorScheme.outlineVariant);
 
   PreferredSizeWidget _appBar(bool readOnly, List<_Item> shown) {
     if (_selecting) {
@@ -519,7 +410,29 @@ class _NotesScreenState extends State<NotesScreen> {
       leading: inFolder
           ? IconButton(tooltip: 'Up', icon: const Icon(Icons.arrow_back_rounded), onPressed: () => _go(Notebook.parentOf(_folder)))
           : null,
-      title: Text(inFolder ? _folder.split('/').last : 'Docket'),
+      // At the top: the notebook's name, a tap away from the others.
+      title: inFolder
+          ? Text(_folder.split('/').last)
+          : Tooltip(
+              message: 'Notebooks',
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () async {
+                  await showNotebooks(context);
+                  if (mounted) _go('');
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    if (readOnly) ...[const Icon(Icons.lock_outline_rounded, size: 18), const SizedBox(width: 6)],
+                    Flexible(
+                      child: Text(_s.pickedVault ? _book.vault.label : 'Docket', overflow: TextOverflow.ellipsis),
+                    ),
+                    const Icon(Icons.arrow_drop_down_rounded),
+                  ]),
+                ),
+              ),
+            ),
       actions: [
         if (!readOnly)
           IconButton(
@@ -561,13 +474,6 @@ class _NotesScreenState extends State<NotesScreen> {
             CheckedPopupMenuItem(value: 'sort-name', checked: _sort == 'name', child: const Text('By name')),
             const PopupMenuDivider(),
             const PopupMenuItem(value: 'graph', child: ListTile(leading: Icon(Icons.hub_outlined), title: Text('Graph of links'))),
-            PopupMenuItem(
-              value: 'vault',
-              child: ListTile(
-                leading: Icon(readOnly ? Icons.lock_outline_rounded : Icons.folder_special_outlined),
-                title: const Text('Where notes are kept'),
-              ),
-            ),
             if (!readOnly) const PopupMenuItem(value: 'archive', child: ListTile(leading: Icon(Icons.archive_outlined), title: Text('Archive'))),
             if (!readOnly) const PopupMenuItem(value: 'trash', child: ListTile(leading: Icon(Icons.delete_outline_rounded), title: Text('Trash'))),
           ],
