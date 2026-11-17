@@ -142,20 +142,38 @@ class Recordings extends ChangeNotifier {
   /// Where an audio file the user added ([name]) waits in the app's folder, for [id].
   String importPathFor(String id, String name) => '${folder.path}/$id--$name';
 
-  /// Pick up recordings an earlier run did not finish.
+  /// Pick up recordings an earlier run did not finish, and those that failed (waiting for the STT model, say),
+  /// which are tried again from their note.
   Future<void> resume() async {
     try {
-      if (!await _queueFile.exists()) return;
-      final list = jsonDecode(await _queueFile.readAsString()) as List;
-      for (final j in list) {
-        final job = RecordingJob.fromJson(j as Map<String, Object?>);
-        if (File(job.raw).existsSync() && !pending(job.id)) _queue.add(job);
+      if (await _queueFile.exists()) {
+        final list = jsonDecode(await _queueFile.readAsString()) as List;
+        for (final j in list) {
+          final job = RecordingJob.fromJson(j as Map<String, Object?>);
+          if (File(job.raw).existsSync() && !pending(job.id)) _queue.add(job);
+        }
+      }
+      if (await _failedFile.exists()) {
+        final failed = jsonDecode(await _failedFile.readAsString()) as Map;
+        for (final MapEntry(:key, :value) in failed.entries) {
+          if (!pending('$key') && _rawOf('$key') != null) _failed['$key'] = '$value';
+        }
       }
     } on Object catch (error) {
       debugPrint('Recordings queue not read: $error');
     }
     notifyListeners();
     unawaited(_next());
+  }
+
+  File get _failedFile => File('${folder.path}/failed.json');
+
+  /// [id]'s audio waiting in the app's folder: a recording, or an added file; null when gone.
+  String? _rawOf(String id) {
+    final raw = rawPathFor(id);
+    if (File(raw).existsSync()) return raw;
+    if (!folder.existsSync()) return null;
+    return folder.listSync().whereType<File>().where((f) => f.uri.pathSegments.last.startsWith('$id--')).firstOrNull?.path;
   }
 
   /// Process [job] (its note already holds [transcribingMarker]).
@@ -177,16 +195,10 @@ class Recordings extends ChangeNotifier {
   /// Try a failed one again.
   void retry(String id) {
     if (_running?.id == id || _queue.any((j) => j.id == id)) return;
-    var raw = rawPathFor(id);
-    if (!File(raw).existsSync()) {
-      // An added audio file rather than a recording.
-      final added = folder.existsSync()
-          ? folder.listSync().whereType<File>().where((f) => f.uri.pathSegments.last.startsWith('$id--')).firstOrNull
-          : null;
-      if (added != null) raw = added.path;
-    }
+    // The recording, or an added audio file.
+    final raw = _rawOf(id);
     final note = _holding(transcribingMarker(id));
-    if (!File(raw).existsSync() || note == null) return;
+    if (raw == null || note == null) return;
     _failed.remove(id);
     add(RecordingJob(
       id: id,
@@ -204,6 +216,7 @@ class Recordings extends ChangeNotifier {
         if (_running != null) _running!.toJson(),
         for (final j in _queue) j.toJson(),
       ]));
+      await _failedFile.writeAsString(jsonEncode(_failed));
     } on Object catch (error) {
       debugPrint('Recordings queue not saved: $error');
     }
@@ -262,7 +275,12 @@ class Recordings extends ChangeNotifier {
       // under its own name.
       _at(id, Stage.saving, 0);
       final Prepared prepared;
-      if (job.imported) {
+      // Tried again (it waited for the STT model, say): its audio is in the note already.
+      final saved = RegExp(r'!\[\[([^\]]+)\]\]\n\n' + RegExp.escape(transcribingMarker(id))).firstMatch(note.text)?[1];
+      if (saved != null) {
+        prepared = await ant.prepareSession(id, job.raw, raw: !job.imported);
+        audioName = saved;
+      } else if (job.imported) {
         prepared = await ant.prepareSession(id, job.raw);
         audioName = await addAttachment(notebook, folder: dir, source: File(job.raw), name: job.importedName, audio: true);
       } else {
@@ -299,6 +317,9 @@ class Recordings extends ChangeNotifier {
           break;
         }
       }
+      // Nothing to hear it with: the recording waits (its audio in the note) and is transcribed once the STT model
+      // is here, rather than written up as heard by nothing.
+      if (heard == null && !ant.status.value.phonon) throw const SttMissing();
       final language = used?.language.isNotEmpty == true
           ? used!.language
           : (detection?.candidates.firstOrNull?.$1 ?? '');
@@ -554,6 +575,14 @@ String cleanedName(String audio) {
 String? cleanedFrom(String audio) {
   final m = RegExp(r'^(.*) \(clean\)(\.[^.]+)?$').firstMatch(audio);
   return m == null ? null : '${m[1]}${m[2] ?? ''}';
+}
+
+/// The STT model is not on the phone: a recording waits for it, its audio saved in its note.
+class SttMissing implements Exception {
+  const SttMissing();
+
+  @override
+  String toString() => 'The STT model is not on this phone.';
 }
 
 /// [text] with [line] (and a blank line) just above [id]'s marker.

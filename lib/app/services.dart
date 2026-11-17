@@ -317,6 +317,8 @@ class Services {
       if (now && !stt) recordings.retryFailed();
       stt = now;
     });
+    // Downloads wanted when the app last closed carry on.
+    downloads.resume();
   }
 
   /// The intro: shown on a fresh install, and from Settings › Help. An update (settings already there) skips it.

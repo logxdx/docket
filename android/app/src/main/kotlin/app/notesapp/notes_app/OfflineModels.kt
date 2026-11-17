@@ -400,6 +400,8 @@ class OfflineModels(private val context: Context) {
         val models = manifest.getJSONObject("models")
         val total = bundledIds().sumOf { id -> filesOf(id)!!.sumOf { it.second } }
         var done = 0L
+        // A fresh install whose APK carries no model has no models folder yet: the stamp below needs one.
+        root.mkdirs()
         stamp.delete()
         for (id in bundledIds()) {
             val dir = File(root, id)

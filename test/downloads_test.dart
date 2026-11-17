@@ -137,6 +137,20 @@ void main() {
     expect(p.downloads.state, DownloadState.idle);
   });
 
+  test('what is wanted is kept for the next start, and carries on then', () async {
+    final p = _Phone()..online = false;
+    p.downloads.want(['a', 'b']);
+    await settle(20);
+    expect(p.settings['downloads.wanted'], 'a,b');
+
+    // The next start: the same settings, a new controller.
+    final next = _Phone()..settings.addAll(p.settings);
+    next.downloads.resume();
+    await settle();
+    expect(next.fetched, ['a', 'b']);
+    expect(next.settings['downloads.wanted'], '');
+  });
+
   test('mobile data: ask unless said otherwise', () {
     final p = _Phone();
     expect(p.downloads.mobileData, MobileData.ask);

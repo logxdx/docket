@@ -70,11 +70,21 @@ class Downloads extends ChangeNotifier {
 
   bool get _mobileFine => _mobileOk || mobileData == MobileData.allowed;
 
+  /// What was wanted when the app last closed, wanted again (at start, once the models are known).
+  void resume() {
+    final saved = [for (final id in (read('downloads.wanted') ?? '').split(',')) if (id.isNotEmpty) id];
+    if (saved.isNotEmpty) want(saved);
+  }
+
+  /// The models still wanted, kept for the next start.
+  void _remember() => write('downloads.wanted', _wanted.join(','));
+
   /// Download [ids] (those not here yet), after what is wanted already. [mobile]: mobile data is fine this time.
   void want(Iterable<String> ids, {bool mobile = false}) {
     for (final id in ids) {
       if (!has(id) && !_wanted.contains(id)) _wanted.add(id);
     }
+    _remember();
     if (mobile) _mobileOk = true;
     if (_state == DownloadState.failed) _set(DownloadState.idle);
     _wake();
@@ -99,6 +109,7 @@ class Downloads extends ChangeNotifier {
   Future<void> stop([Iterable<String>? ids]) async {
     final gone = ids?.toSet() ?? _wanted.toSet();
     _wanted.removeWhere(gone.contains);
+    _remember();
     final current = _current;
     if (current != null && gone.contains(current)) await cancel(current);
     _wake();
@@ -133,6 +144,7 @@ class Downloads extends ChangeNotifier {
       while (true) {
         _wanted.removeWhere(has);
         if (_wanted.isEmpty) {
+          _remember();
           _mobileOk = false;
           _set(DownloadState.idle);
           return;
@@ -164,6 +176,7 @@ class Downloads extends ChangeNotifier {
         try {
           await fetch(id);
           _wanted.remove(id);
+          _remember();
           notifyListeners();
         } on Object catch (error) {
           if (_pausedForWifi || !_wanted.contains(id)) continue;
