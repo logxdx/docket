@@ -33,8 +33,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   // Where notes live: Documents/Docket (or the app's own folder on older installs), until another is picked.
   var _picking = false;
 
-  // What to download: every group not on the phone yet, until unticked.
-  final _skip = <String>{};
+  // What runs: Docket's speech models or Android's own, and the notes models (ticked until unticked).
+  late var _sttAndroid = _s.androidStt;
+  late var _ttsAndroid = _s.androidTts;
+  var _notesWanted = true;
 
   // The AI server.
   late final _url = TextEditingController(text: _s.modelUrl);
@@ -84,11 +86,30 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     if (mounted) setState(() {});
   }
 
+  /// [name]'s group, when this build downloads it.
+  ModelGroup? _group(String name) {
+    final g = modelGroup(name);
+    return g.offered(_s.ant.status.value).isEmpty ? null : g;
+  }
+
+  /// The groups chosen to download and not on the phone yet: Docket's speech models unless Android's own is picked.
+  List<ModelGroup> get _chosen => [
+        for (final g in _missing)
+          if ((g.name == 'STT model' && !_sttAndroid) ||
+              (g.name == 'TTS model' && !_ttsAndroid) ||
+              (g.name == 'Notes models' && _notesWanted))
+            g,
+      ];
+
+  /// The speech choices made here, kept.
+  void _keepSpeech() {
+    _s.setAndroidStt(_sttAndroid);
+    _s.setAndroidTts(_ttsAndroid);
+  }
+
   Future<void> _download() async {
-    final ids = [
-      for (final g in _missing)
-        if (!_skip.contains(g.name)) ...g.offered(_s.ant.status.value),
-    ];
+    _keepSpeech();
+    final ids = [for (final g in _chosen) ...g.offered(_s.ant.status.value)];
     if (ids.isNotEmpty && !await getModels(context, ids)) return;
     if (mounted) _go(_Step.ai);
   }
@@ -349,43 +370,83 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       builder: (context, _) {
         final theme = Theme.of(context);
         final muted = theme.colorScheme.onSurfaceVariant;
+        final accent = Accent.of(context);
         final status = _s.ant.status.value;
-        final chosen = [for (final g in _missing) if (!_skip.contains(g.name)) g];
+        final chosen = _chosen;
         final bytes = chosen.fold(0, (n, g) => n + g.missing(status));
         final wifi = _s.downloads.mobileData == MobileData.allowed ? '' : ', over Wi-Fi. On mobile data, Docket asks first';
+
+        /// Docket's model for [g]: its size, or that it is here already.
+        String size(ModelGroup g) => g.ready(status) ? 'on this phone' : sizeLabel(g.missing(status));
+
+        Widget card(List<Widget> children) => Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.fromLTRB(6, 10, 12, 6),
+              decoration: BoxDecoration(color: theme.colorScheme.surfaceContainer, borderRadius: BorderRadius.circular(22)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
+            );
+        Widget title(String text) => Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 0, 2),
+              child: Text(text, style: theme.textTheme.titleMedium),
+            );
+        Widget choice(bool on, String label, String text, VoidCallback? onTap) => ListTile(
+              dense: true,
+              enabled: onTap != null,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+              leading: Icon(on ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
+                  color: on ? accent : muted),
+              title: Text(label, style: theme.textTheme.bodyLarge),
+              subtitle: Text(text, style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.35)),
+              onTap: onTap,
+            );
+
+        final stt = _group('STT model');
+        final tts = _group('TTS model');
+        final notes = _group('Notes models');
         return _page(
           context,
           children: [
-            _heading(context, 'Download what Docket runs',
-                'Once, from Hugging Face. Then it all works offline. Change it any time in Settings.'),
-            for (final g in _groups)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Material(
-                  color: theme.colorScheme.surfaceContainer,
-                  borderRadius: BorderRadius.circular(22),
-                  clipBehavior: Clip.antiAlias,
-                  child: CheckboxListTile(
-                    contentPadding: const EdgeInsets.fromLTRB(18, 8, 12, 8),
-                    value: g.ready(status) || !_skip.contains(g.name),
-                    onChanged: g.ready(status)
-                        ? null
-                        : (on) => setState(() => on == true ? _skip.remove(g.name) : _skip.add(g.name)),
-                    title: Text(g.name, style: theme.textTheme.titleMedium),
-                    subtitle: Text(
-                      '${g.purpose}\n${g.ready(status) ? 'On this phone' : sizeLabel(g.missing(status))}',
-                      style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.45),
-                    ),
-                  ),
+            _heading(context, 'What Docket runs',
+                'Docket\'s models, downloaded once, or what Android has already. Change it any time in Settings.'),
+            if (stt != null)
+              card([
+                title('Speech to text'),
+                choice(!_sttAndroid, 'Docket\'s model · ${size(stt)}', 'Finds the language itself; Clean up and live words',
+                    () => setState(() => _sttAndroid = false)),
+                choice(
+                  _sttAndroid,
+                  'Android\'s own',
+                  _s.canAndroidStt ? 'No download; in the language you set, on the phone' : 'Needs Android 13 or newer',
+                  _s.canAndroidStt ? () => setState(() => _sttAndroid = true) : null,
+                ),
+              ]),
+            if (tts != null)
+              card([
+                title('Read aloud'),
+                choice(!_ttsAndroid, 'Docket\'s voice · ${size(tts)}', 'Natural voices, and your own',
+                    () => setState(() => _ttsAndroid = false)),
+                choice(_ttsAndroid, 'Android\'s own', 'No download; the phone\'s voices', () => setState(() => _ttsAndroid = true)),
+              ]),
+            if (notes != null)
+              Material(
+                color: theme.colorScheme.surfaceContainer,
+                borderRadius: BorderRadius.circular(22),
+                clipBehavior: Clip.antiAlias,
+                child: CheckboxListTile(
+                  contentPadding: const EdgeInsets.fromLTRB(18, 6, 12, 6),
+                  value: notes.ready(status) || _notesWanted,
+                  onChanged: notes.ready(status) ? null : (on) => setState(() => _notesWanted = on ?? false),
+                  title: Text('Notes models · ${size(notes)}', style: theme.textTheme.titleMedium),
+                  subtitle: Text('Titles, tags and search by meaning', style: theme.textTheme.bodySmall?.copyWith(color: muted)),
                 ),
               ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
+              padding: const EdgeInsets.fromLTRB(4, 14, 4, 0),
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Icon(Icons.wifi_rounded, size: 18, color: muted),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text('${sizeLabel(bytes)} in all$wifi.',
+                  child: Text(bytes == 0 ? 'Nothing to download.' : '${sizeLabel(bytes)} in all$wifi.',
                       style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.45)),
                 ),
               ]),
@@ -394,14 +455,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           buttons: [
             FilledButton(
               style: _big(context),
-              onPressed: chosen.isEmpty ? null : () => unawaited(_download()),
-              child: Text('Download · ${sizeLabel(bytes)}'),
+              onPressed: () => unawaited(_download()),
+              child: Text(bytes == 0 ? 'Continue' : 'Download · ${sizeLabel(bytes)}'),
             ),
-            TextButton(
-              style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-              onPressed: () => _go(_Step.ai),
-              child: const Text('Later'),
-            ),
+            if (bytes > 0)
+              TextButton(
+                style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                onPressed: () {
+                  _keepSpeech();
+                  _go(_Step.ai);
+                },
+                child: const Text('Later'),
+              ),
           ],
           where: 'Step 3 of 4',
         );

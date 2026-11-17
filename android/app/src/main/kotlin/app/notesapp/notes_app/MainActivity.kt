@@ -35,6 +35,8 @@ class MainActivity : FlutterActivity() {
                         requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), MIC)
                     }
                 }
+                // The Android version: its speech to text reads a recording from a file from Android 13 (33).
+                "sdk" -> result.success(Build.VERSION.SDK_INT)
                 // Whether the microphone is allowed already, without asking (the primer comes before the asking).
                 "micGranted" -> result.success(
                     checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,

@@ -39,17 +39,23 @@ class _WhatDocketCanDo extends StatelessWidget {
 
           return ListView(padding: const EdgeInsets.only(bottom: 24), children: [
             _Group('On this phone', [
+              // With Android's own speech to text, recording needs no download; Clean up is Docket's model's.
               row(Icons.mic_none_rounded, 'Record and transcribe', 'Talk; Docket writes it down, titles and tags it',
-                  needs: 'STT model', onTap: () => open(const RecordScreen())),
-              row(Icons.auto_fix_high_rounded, 'Clean up a recording',
-                  'The wand on a transcript: less noise, who said what, tap a word to play', needs: 'STT model'),
+                  needs: s.androidStt ? null : 'STT model', onTap: () => open(const RecordScreen())),
+              row(
+                  Icons.auto_fix_high_rounded,
+                  'Clean up a recording',
+                  s.androidStt
+                      ? 'With Docket\'s speech to text (Settings › Speech)'
+                      : 'The wand on a transcript: less noise, who said what, tap a word to play',
+                  needs: s.androidStt ? null : 'STT model'),
               row(Icons.edit_note_rounded, 'Write', 'Lists, tasks, links and tags, in Markdown files'),
               row(Icons.image_outlined, 'Pictures and audio files', 'Add them with +; both become searchable'),
               row(Icons.manage_search_rounded, 'Search by meaning',
                   'Finds notes, recordings and pictures by what you mean',
                   needs: 'Notes models', onTap: () => open(const SearchScreen())),
               row(Icons.volume_up_outlined, 'Read aloud', 'Any note, in the voice and speed you pick',
-                  needs: 'TTS model'),
+                  needs: s.androidTts ? null : 'TTS model'),
               row(Icons.today_rounded, 'Today\'s note', 'One note a day, a tap from the top bar', onTap: () async {
                 final note = await s.notebook.daily();
                 if (context.mounted) open(NoteScreen(path: note.path, startEditing: true));

@@ -32,7 +32,7 @@ typedef NotebookPlace = ({String uri, String name, bool readOnly});
 
 class Services {
   Services._(this.support, this.documents, this.settings, this._key,
-      {required this.fresh, this.shared, this.foundOldNotes = false});
+      {required this.fresh, this.shared, this.foundOldNotes = false, this.sdk = 0});
 
   /// The app's own folders: [support] for its index and settings,
   /// [documents] for the notes kept in the app (Notes/: installs from before Documents/Docket).
@@ -50,6 +50,9 @@ class Services {
   /// A fresh install found a Docket folder in Documents, left by an earlier install: Android hides its files from
   /// this one until it is picked (the intro offers that).
   final bool foundOldNotes;
+
+  /// The phone's Android version (SDK level).
+  final int sdk;
 
   static const _secrets = FlutterSecureStorage();
 
@@ -71,10 +74,16 @@ class Services {
       shared = null;
     }
     final path = shared?['path'] as String?;
+    int sdk;
+    try {
+      sdk = await const MethodChannel('notes/permissions').invokeMethod<int>('sdk') ?? 0;
+    } on Object {
+      sdk = 0;
+    }
     // A fresh install keeps its notes in Documents/Docket, where the user and other apps can reach them.
     if (fresh && path != null) settings.set('notes.home', 'documents');
     return Services._(support, documents, settings, key,
-        fresh: fresh, shared: path, foundOldNotes: fresh && shared?['docket'] == true);
+        fresh: fresh, shared: path, foundOldNotes: fresh && shared?['docket'] == true, sdk: sdk);
   }
 
   /// Notes not in a picked folder: Documents/Docket, or the app's own folder (installs from before, and phones
@@ -261,7 +270,32 @@ class Services {
   }
 
   /// Desert Ant's models, on the phone (lib/app/desert_ant.dart).
-  late final ant = DesertAnt();
+  late final ant = DesertAnt()..androidVoice = androidTts;
+
+  /// Settings › Speech: Docket's models (the default) or Android's own, for speech to text and for reading aloud.
+  /// Android's speech to text reads a recording from a file from Android 13.
+  bool get canAndroidStt => sdk >= 33;
+  bool get androidStt => settings.get('speech.stt') == 'android' && canAndroidStt;
+  bool get androidTts => settings.get('speech.tts') == 'android';
+
+  void setAndroidStt(bool on) => settings.set('speech.stt', on ? 'android' : 'docket');
+
+  void setAndroidTts(bool on) {
+    settings.set('speech.tts', on ? 'android' : 'docket');
+    ant.androidVoice = on;
+  }
+
+  /// Where the chosen voice is kept: each engine its own.
+  String get voiceKey => androidTts ? 'speech.androidVoice' : 'speech.voice';
+
+  /// Notes can be read aloud: with Android's voices, or Docket's once its TTS model is here.
+  bool get canReadAloud => androidTts || ant.status.value.speech;
+
+  /// The language Android's speech to text hears (it cannot find it itself): the one set, else the phone's.
+  String get sttLanguage {
+    final set = settings.get('speech.language') ?? '';
+    return set.isNotEmpty ? set : Platform.localeName.split(RegExp('[_.-]')).first;
+  }
 
   late final summaries = Summaries(notebook: notebook, summarise: _summarise, keepAudio: () => true);
 
@@ -273,6 +307,7 @@ class Services {
     summaries: summaries,
     canSummarise: () => model != null,
     enabled: autoEnabled,
+    androidStt: () => androidStt ? sttLanguage : null,
   );
 
   /// Search by meaning: notes, recordings' transcripts and pictures, kept up to date in the background

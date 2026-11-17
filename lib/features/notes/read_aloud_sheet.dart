@@ -59,7 +59,7 @@ class _ReadAloudSheetState extends State<_ReadAloudSheet> {
       await _services.ant.readAloud(
         widget.sentences,
         from: from.clamp(0, widget.sentences.length - 1),
-        voice: _services.settings.get('speech.voice'),
+        voice: _services.settings.get(_services.voiceKey),
         speed: double.tryParse(_services.settings.get('speech.speed') ?? '') ?? 1.0,
       );
     } on Object catch (error) {

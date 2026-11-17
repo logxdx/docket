@@ -5,6 +5,7 @@
 library;
 
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show PlatformException;
@@ -15,6 +16,7 @@ import '../../app/theme.dart';
 import '../../core/ai/model.dart';
 import '../../core/ai/prompts.dart';
 import '../../core/notes/read_aloud.dart' show readingVoiceRegions;
+import '../../core/voice/spoken.dart' show languageName;
 import '../notes/note_screen.dart';
 import '../notes/notebooks_sheet.dart';
 import '../notes/record_screen.dart';
@@ -23,6 +25,7 @@ import '../onboarding/onboarding_screen.dart';
 import 'models_screen.dart';
 
 part 'ai_screen.dart';
+part 'speech_screen.dart';
 part 'what_docket_can_do.dart';
 
 /// The app's version, as pubspec.yaml has it.
@@ -38,8 +41,21 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late final Services _s = ServicesScope.of(context);
 
-  double get _speed => double.tryParse(_s.settings.get('speech.speed') ?? '') ?? 1.0;
-  String get _voice => (_s.settings.get('speech.voice') ?? '').isEmpty ? 'Default' : _s.settings.get('speech.voice')!;
+  /// What the title and tag switches need and have not got (null: nothing missing).
+  String? _notesNote(ModelStatus status) {
+    final notes = modelGroup('Notes models');
+    if (notes.offered(status).isEmpty || notes.ready(status)) return null;
+    return notes.coming(_s.ant.downloading.value, _s.downloads.wanted)
+        ? 'Downloading the notes models…'
+        : 'Needs the notes models · Download';
+  }
+
+  void _getNotesModels() => getModels(context, modelGroup('Notes models').offered(_s.ant.status.value));
+
+  Future<void> _speech() async {
+    await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const _SpeechScreen()));
+    if (mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -52,8 +68,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         builder: (context, status, _) => ListenableBuilder(
           listenable: _s.appearance,
           builder: (context, _) => ListView(padding: const EdgeInsets.only(bottom: 24), children: [
-            _Group('Recording', [
-              _Switch('Live transcription', _s.autoEnabled('live'), (on) => setState(() => _s.setAutoEnabled('live', on))),
+            // Docket's models or Android's own, for speech to text and reading aloud (Settings › Speech).
+            _Group('Speech', [
+              _Row('Speech to text', value: _s.androidStt ? 'Android\'s own' : 'Docket\'s model', onTap: _speech),
+              _Row('Read aloud', value: _s.androidTts ? 'Android\'s own' : 'Docket\'s voice', onTap: _speech),
             ]),
             _Group('Smart notes', [
               _Row(
@@ -71,13 +89,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 }(),
                 onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const ModelsScreen())),
               ),
-              _Switch('Title new notes', _s.autoEnabled('title'), (on) => setState(() => _s.setAutoEnabled('title', on))),
-              _Switch('Tag topics', _s.autoEnabled('tags'), (on) => setState(() => _s.setAutoEnabled('tags', on))),
+              // A switch stays as set; without the notes models, the line under it says so and gets them.
+              _Switch('Title new notes', _s.autoEnabled('title'), (on) => setState(() => _s.setAutoEnabled('title', on)),
+                  note: _notesNote(status), onNote: _getNotesModels),
+              _Switch('Tag topics', _s.autoEnabled('tags'), (on) => setState(() => _s.setAutoEnabled('tags', on)),
+                  note: _notesNote(status), onNote: _getNotesModels),
             ]),
-            if (status.speech)
-              _Group('Read aloud', [
-                _Row('Voice', value: '$_voice · ${_speedLabel(_speed)}', onTap: _pickVoice),
-              ]),
             _Group('Notes', [
               _Row('Notebooks',
                   value: _s.pickedVault ? _s.notebook.vault.label : _s.homeLabel,
@@ -197,16 +214,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _pickVoice() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (_) => _VoiceSheet(services: _s),
-    );
-    unawaited(_s.ant.stopReading());
-    if (mounted) setState(() {});
-  }
+}
+
+/// Android's voice names ("en-gb-x-gba-local", "en-GB-language") as a person would read them.
+String _androidVoiceLabel(String name) {
+  final voice = RegExp(r'^([a-z]{2,3})-[a-z]{2}-x-([a-z0-9]+)-(?:local|network)$', caseSensitive: false).firstMatch(name);
+  if (voice != null) return '${languageName(voice[1]!)} · ${voice[2]!.toUpperCase()}';
+  final standard = RegExp(r'^([a-z]{2,3})-[a-z]{2}-language$', caseSensitive: false).firstMatch(name);
+  if (standard != null) return '${languageName(standard[1]!)} · standard';
+  return name;
+}
+
+/// Where an Android voice speaks from: its region ("en-gb-…": UK).
+String _androidVoiceRegion(String name) {
+  final region = RegExp(r'^[a-z]{2,3}-([a-z]{2})\b', caseSensitive: false).firstMatch(name)?[1]?.toUpperCase();
+  return switch (region) {
+    null => 'Other',
+    'GB' => 'UK',
+    'IN' => 'India',
+    'AU' => 'Australia',
+    'NG' => 'Nigeria',
+    _ => region,
+  };
 }
 
 String _speedLabel(double speed) => '${speed.toStringAsFixed(speed * 10 % 1 == 0 ? 1 : 2)}×';
@@ -295,28 +324,47 @@ class _Row extends StatelessWidget {
 
 /// A row that turns something on or off; the whole row toggles.
 class _Switch extends StatelessWidget {
-  const _Switch(this.label, this.value, this.onChanged);
+  const _Switch(this.label, this.value, this.onChanged, {this.note, this.onNote});
 
   final String label;
   final bool value;
   final ValueChanged<bool> onChanged;
 
+  /// A line under the label, in the accent (what the setting needs and has not got); [onNote] when it is tapped.
+  final String? note;
+  final VoidCallback? onNote;
+
   @override
-  Widget build(BuildContext context) => MergeSemantics(
-        child: InkWell(
-          onTap: () => onChanged(!value),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 56),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(children: [
-                Expanded(child: Text(label, style: Theme.of(context).textTheme.bodyLarge)),
-                Switch(value: value, onChanged: onChanged),
-              ]),
-            ),
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return MergeSemantics(
+      child: InkWell(
+        onTap: () => onChanged(!value),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 56),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(children: [
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                  Text(label, style: theme.textTheme.bodyLarge),
+                  if (note != null)
+                    GestureDetector(
+                      onTap: onNote,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 2, bottom: 4),
+                        child: Text(note!, style: theme.textTheme.bodyMedium?.copyWith(color: Accent.of(context))),
+                      ),
+                    ),
+                ]),
+              ),
+              Switch(value: value, onChanged: onChanged),
+            ]),
           ),
         ),
-      );
+      ),
+    );
+  }
 }
 
 /// A row with a control of its own on the right.
@@ -446,10 +494,13 @@ class _VoiceSheetState extends State<_VoiceSheet> {
   bool _adding = false;
 
   /// All the voices, and which of them are the user's own.
-  Future<(List<String>, List<String>)> _load() async =>
-      (await widget.services.ant.voices(), await widget.services.ant.customVoices());
+  Future<(List<String>, List<String>)> _load() async => (
+        await widget.services.ant.voices(),
+        // Voices of one's own are Docket's (Phonon) only.
+        widget.services.androidTts ? const <String>[] : await widget.services.ant.customVoices(),
+      );
 
-  String get _chosen => widget.services.settings.get('speech.voice') ?? '';
+  String get _chosen => widget.services.settings.get(widget.services.voiceKey) ?? '';
   double get _speed => double.tryParse(widget.services.settings.get('speech.speed') ?? '') ?? 1.0;
 
   Future<void> _hear(String voice) async {
@@ -507,7 +558,7 @@ class _VoiceSheetState extends State<_VoiceSheet> {
     setState(() => _adding = true);
     try {
       final kept = await ant.addVoice(picked.path, name);
-      widget.services.settings.set('speech.voice', kept);
+      widget.services.settings.set(widget.services.voiceKey, kept);
       if (mounted) setState(() => _voices = _load());
     } on PlatformException catch (e) {
       if (mounted) setState(() => _problem = e.message ?? 'This file could not be added.');
@@ -521,7 +572,7 @@ class _VoiceSheetState extends State<_VoiceSheet> {
     if (name == null || name.trim().isEmpty || !mounted) return;
     try {
       final kept = await widget.services.ant.renameVoice(voice, name);
-      if (_chosen == voice) widget.services.settings.set('speech.voice', kept);
+      if (_chosen == voice) widget.services.settings.set(widget.services.voiceKey, kept);
       setState(() => _voices = _load());
     } on PlatformException catch (e) {
       setState(() => _problem = e.message ?? 'The voice could not be renamed.');
@@ -542,7 +593,7 @@ class _VoiceSheetState extends State<_VoiceSheet> {
     );
     if (sure != true || !mounted) return;
     await widget.services.ant.removeVoice(voice);
-    if (_chosen == voice) widget.services.settings.set('speech.voice', '');
+    if (_chosen == voice) widget.services.settings.set(widget.services.voiceKey, '');
     setState(() => _voices = _load());
   }
 
@@ -566,7 +617,7 @@ class _VoiceSheetState extends State<_VoiceSheet> {
           borderRadius: BorderRadius.circular(14),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
-            onTap: () => setState(() => settings.set('speech.voice', v)),
+            onTap: () => setState(() => settings.set(widget.services.voiceKey, v)),
             child: SizedBox(
               height: 52,
               child: Row(children: [
@@ -574,7 +625,10 @@ class _VoiceSheetState extends State<_VoiceSheet> {
                 Icon(_chosen == v ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
                     color: _chosen == v ? accent : muted),
                 const SizedBox(width: 12),
-                Expanded(child: Text(v, style: theme.textTheme.bodyLarge, overflow: TextOverflow.ellipsis)),
+                Expanded(
+                  child: Text(widget.services.androidTts ? _androidVoiceLabel(v) : v,
+                      style: theme.textTheme.bodyLarge, overflow: TextOverflow.ellipsis),
+                ),
                 IconButton(
                   tooltip: 'Hear $v',
                   onPressed: () => _hear(v),
@@ -609,7 +663,11 @@ class _VoiceSheetState extends State<_VoiceSheet> {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(4, 2, 4, 6),
-              child: Text('Tap play to hear a voice. English only.', style: theme.textTheme.bodyMedium?.copyWith(color: muted)),
+              child: Text(
+                  widget.services.androidTts
+                      ? 'Tap play to hear a voice. The phone\'s offline voices.'
+                      : 'Tap play to hear a voice. English only.',
+                  style: theme.textTheme.bodyMedium?.copyWith(color: muted)),
             ),
             if (_problem.isNotEmpty)
               Padding(
@@ -623,12 +681,17 @@ class _VoiceSheetState extends State<_VoiceSheet> {
                   final (all, custom) = snap.data ?? (const <String>[], const <String>[]);
                   final mine = custom.toSet();
                   final groups = <String, List<String>>{};
+                  final android = widget.services.androidTts;
                   for (final v in all) {
                     if (mine.contains(v)) continue;
-                    groups.putIfAbsent(readingVoiceRegions[v] ?? 'Other', () => []).add(v);
+                    final region = android ? _androidVoiceRegion(v) : readingVoiceRegions[v] ?? 'Other';
+                    groups.putIfAbsent(region, () => []).add(v);
                   }
-                  final order = ['UK', 'US', 'Other'].where(groups.containsKey);
+                  final order = android
+                      ? (groups.keys.toList()..sort())
+                      : ['UK', 'US', 'Other'].where(groups.containsKey);
                   return ListView(children: [
+                    if (!widget.services.androidTts) ...[
                     header(
                       'Custom voices',
                       action: _adding
@@ -645,6 +708,7 @@ class _VoiceSheetState extends State<_VoiceSheet> {
                             style: theme.textTheme.bodySmall?.copyWith(color: muted)),
                       ),
                     for (final v in custom) voiceRow(v, custom: true),
+                    ],
                     for (final region in order) ...[
                       header(region),
                       for (final v in groups[region]!) voiceRow(v),

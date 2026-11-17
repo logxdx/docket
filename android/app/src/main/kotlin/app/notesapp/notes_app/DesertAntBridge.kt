@@ -13,6 +13,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -51,6 +53,9 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
         // App storage the user (and adb) can reach; the models' own folder is replaced when they are pushed.
         customDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "voices"),
     )
+
+    /** Notes read aloud with Android's own voices instead (Settings › Speech). */
+    private val androidReader = AndroidReader(context)
 
     /** A recording being processed: its 16 kHz (or native-rate) copy for the speech models. */
     private class Session(val samples: FloatArray, val rate: Int, val durationSec: Double) {
@@ -227,8 +232,25 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
         }
 
         // Reading aloud
-        "speech.voices" -> withContext(Dispatchers.IO) { if (reader.available()) reader.voices() else emptyList() }
-        "speech.start" -> {
+        // "engine": "android" reads with Android's own voices; otherwise Docket's (Phonon TTS).
+        "speech.voices" -> if (call.argument<String>("engine") == "android") {
+            suspendCancellableCoroutine { done -> androidReader.voices { done.resume(it) } }
+        } else {
+            withContext(Dispatchers.IO) { if (reader.available()) reader.voices() else emptyList() }
+        }
+        "speech.start" -> if (call.argument<String>("engine") == "android") {
+            androidReader.start(
+                call.argument<List<String>>("sentences")!!,
+                call.argument<Int>("from") ?: 0,
+                call.argument<String>("voice"),
+                (call.argument<Double>("speed") ?: 1.0).toFloat(),
+                onSentence = { i -> channel.invokeMethod("speech.sentence", mapOf("index" to i)) },
+                onDone = { completed, error ->
+                    channel.invokeMethod("speech.done", mapOf("completed" to completed, "error" to error))
+                },
+            )
+            null
+        } else {
             if (!reader.available()) throw IllegalStateException("the reading voice is not on this phone")
             reader.start(
                 call.argument<List<String>>("sentences")!!,
@@ -255,9 +277,14 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
         "speech.renameVoice" -> withContext(Dispatchers.IO) {
             reader.renameVoice(call.argument<String>("from")!!, call.argument<String>("to")!!)
         }
-        "speech.pause" -> reader.pause().let { null }
-        "speech.resume" -> reader.resume().let { null }
-        "speech.stop" -> reader.stop().let { null }
+        "speech.pause" -> (if (call.argument<String>("engine") == "android") androidReader.pause() else reader.pause()).let { null }
+        "speech.resume" -> (if (call.argument<String>("engine") == "android") androidReader.resume() else reader.resume()).let { null }
+        "speech.stop" -> {
+            // Both: switching engine while one reads leaves nothing reading.
+            reader.stop()
+            androidReader.stop()
+            null
+        }
 
         // Text
         "text.topics" -> gist()?.classify(call.argument<String>("text")!!, topK = call.argument<Int>("limit") ?: 3)

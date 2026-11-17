@@ -96,7 +96,8 @@ class _RecordScreenState extends State<RecordScreen> {
       setState(() => _problem = 'Recording needs the microphone: allow it in the phone\'s settings for Docket.');
       return;
     }
-    _live = _services.autoEnabled('live') && _ant.status.value.phonon;
+    // Live words come from Docket's model; Android's own speech to text hears the recording after.
+    _live = _services.autoEnabled('live') && _ant.status.value.phonon && !_services.androidStt;
     // Earlier recordings wait: the live words need Phonon and the CPU.
     _services.recordings.holdWhileRecording(true);
     try {

@@ -226,15 +226,21 @@ class DesertAnt {
   Future<String> renameVoice(String from, String to) async =>
       (await _channel.invokeMethod<String>('speech.renameVoice', {'from': from, 'to': to}))!;
 
+  /// Reading aloud with Android's own voices rather than Docket's (Settings › Speech).
+  bool androidVoice = false;
+
+  String get _engine => androidVoice ? 'android' : 'docket';
+
   /// The voices to read with.
-  Future<List<String>> voices() async => [...((await _call<List>('speech.voices')) ?? const []).cast<String>()];
+  Future<List<String>> voices() async =>
+      [...((await _call<List>('speech.voices', {'engine': _engine})) ?? const []).cast<String>()];
 
   /// Read [sentences] from [from] in [voice] at [speed]; [reading] follows.
   Future<void> readAloud(List<String> sentences, {int from = 0, String? voice, double speed = 1.0}) async {
     reading.value = (index: from, playing: true);
     readingError.value = null;
     try {
-      await _call<void>('speech.start', {'sentences': sentences, 'from': from, 'voice': voice, 'speed': speed});
+      await _call<void>('speech.start', {'sentences': sentences, 'from': from, 'voice': voice, 'speed': speed, 'engine': _engine});
     } on PlatformException {
       reading.value = null;
       rethrow;
@@ -242,13 +248,13 @@ class DesertAnt {
   }
 
   Future<void> pauseReading() async {
-    await _call<void>('speech.pause');
+    await _call<void>('speech.pause', {'engine': _engine});
     final r = reading.value;
     if (r != null) reading.value = (index: r.index, playing: false);
   }
 
   Future<void> resumeReading() async {
-    await _call<void>('speech.resume');
+    await _call<void>('speech.resume', {'engine': _engine});
     final r = reading.value;
     if (r != null) reading.value = (index: r.index, playing: true);
   }
@@ -266,6 +272,15 @@ class DesertAnt {
       return await _permissions.invokeMethod<bool>('microphone') ?? false;
     } on MissingPluginException {
       return false;
+    }
+  }
+
+  /// The phone's Android version (SDK level); 0 when unknown.
+  Future<int> sdk() async {
+    try {
+      return await _permissions.invokeMethod<int>('sdk') ?? 0;
+    } on MissingPluginException {
+      return 0;
     }
   }
 

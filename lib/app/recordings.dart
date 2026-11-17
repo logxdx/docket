@@ -88,6 +88,7 @@ class Recordings extends ChangeNotifier {
     required this.summaries,
     required this.canSummarise,
     required this.enabled,
+    this.androidStt,
   });
 
 
@@ -104,6 +105,9 @@ class Recordings extends ChangeNotifier {
 
   /// Settings › On-device AI: 'title' and 'tags' on or off.
   final bool Function(String feature) enabled;
+
+  /// Settings › Speech: the language to hear with Android's own speech to text, or null for Docket's model.
+  final String? Function()? androidStt;
 
   final _queue = <RecordingJob>[];
 
@@ -301,10 +305,14 @@ class Recordings extends ChangeNotifier {
       final audioPath = dir.isEmpty ? audioName : '$dir/$audioName';
       await _edit(id, (text) => _insertBeforeMarker(text, id, '![[$audioName]]'));
 
-      // 2. The language, and the recognizer for it.
+      // 2. The language, and the recognizer for it: Android's own in the language set (it cannot find it),
+      // or the one Ear hears.
       _at(id, Stage.language);
-      final detection = await ant.identify(id);
-      final attempts = routeFor(detection?.candidates ?? const [], reliable: detection?.reliable ?? false);
+      final android = androidStt?.call();
+      final detection = android != null ? null : await ant.identify(id);
+      final attempts = android != null
+          ? [(engine: Engine.device, language: android)]
+          : routeFor(detection?.candidates ?? const [], reliable: detection?.reliable ?? false);
 
       _at(id, Stage.transcribing);
       Heard? heard;
@@ -329,7 +337,7 @@ class Recordings extends ChangeNotifier {
       }
       // Nothing to hear it with: the recording waits (its audio in the note) and is transcribed once the STT model
       // is here, rather than written up as heard by nothing.
-      if (heard == null && !ant.status.value.phonon) throw const SttMissing();
+      if (heard == null && android == null && !ant.status.value.phonon) throw const SttMissing();
       final language = used?.language.isNotEmpty == true
           ? used!.language
           : (detection?.candidates.firstOrNull?.$1 ?? '');

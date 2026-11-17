@@ -936,7 +936,14 @@ class _ModelsNudgeState extends State<_ModelsNudge> {
           );
         }
         final none = status.downloads.isNotEmpty && !status.downloads.keys.any(status.has);
-        if (!none || s.downloads.wanted.isNotEmpty || s.settings.get('models.nudged') == 'yes') {
+        // Docket's models only for what Android's own speech does not do instead (Settings › Speech).
+        final ids = [
+          for (final g in modelGroups)
+            if (!(g.name == 'STT model' && s.androidStt) && !(g.name == 'TTS model' && s.androidTts))
+              ...g.offered(status),
+        ];
+        final bytes = ids.fold(0, (n, id) => n + (status.has(id) ? 0 : status.downloads[id]!));
+        if (!none || bytes == 0 || s.downloads.wanted.isNotEmpty || s.settings.get('models.nudged') == 'yes') {
           return const SizedBox.shrink();
         }
         return Padding(
@@ -949,7 +956,7 @@ class _ModelsNudgeState extends State<_ModelsNudge> {
                 Text('Transcripts, reading aloud, titles and search', style: theme.textTheme.titleSmall),
                 const SizedBox(height: 4),
                 Text(
-                  'Download the models (${sizeLabel(status.missingBytes)}, once). They run on this phone; '
+                  'Download the models (${sizeLabel(bytes)}, once). They run on this phone; '
                   'nothing you record or write is sent.',
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.4),
                 ),
@@ -959,7 +966,7 @@ class _ModelsNudgeState extends State<_ModelsNudge> {
                     child: const Text('Not now'),
                   ),
                   FilledButton.tonal(
-                    onPressed: () => getModels(context, status.downloads.keys),
+                    onPressed: () => getModels(context, ids),
                     child: const Text('Download'),
                   ),
                 ]),

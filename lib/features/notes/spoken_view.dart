@@ -385,7 +385,7 @@ class TranscribingCard extends StatelessWidget {
         final busy = failure == null && stage != null;
         final status = s.ant.status.value;
         // Not transcribed for want of the STT model: it waits for it, and says how to get it.
-        if (failure != null && !status.phonon && status.downloads.isNotEmpty) {
+        if (failure != null && !status.phonon && !s.androidStt && status.downloads.isNotEmpty) {
           return _waiting(context, s);
         }
         return Container(

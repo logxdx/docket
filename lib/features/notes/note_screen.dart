@@ -35,8 +35,8 @@ import 'note_tools.dart';
 import '../../core/notes/fuzzy.dart';
 import '../../core/notes/obsidian.dart' show countWords, forReading;
 import '../onboarding/tips.dart';
+import 'missing_models.dart';
 import 'notes_screen.dart' show pickFolder;
-import 'read_aloud_sheet.dart';
 import 'record_screen.dart';
 import 'spoken_view.dart';
 
@@ -166,7 +166,7 @@ class _NoteScreenState extends State<NoteScreen> {
       // The third note opened, with reading aloud on the phone: the tip about it, once.
       final count = (int.tryParse(s.settings.get('notes.openedCount') ?? '') ?? 0) + 1;
       if (count <= 3) s.settings.set('notes.openedCount', '$count');
-      _readAloudTip = count >= 3 && s.ant.status.value.speech && s.tipDue('read-aloud');
+      _readAloudTip = count >= 3 && s.canReadAloud && s.tipDue('read-aloud');
     }
     _summaries ??= ServicesScope.of(context).summaries..addListener(_summaryLanded);
     _recordings ??= ServicesScope.of(context).recordings..addListener(_recordingLanded);
@@ -733,15 +733,15 @@ class _NoteScreenState extends State<NoteScreen> {
               icon: Icon(_editing ? Icons.visibility_outlined : Icons.edit_outlined),
               onPressed: _toggleEditing,
             ),
-          if (ServicesScope.of(context).ant.status.value.speech)
-            IconButton(
-              tooltip: 'Read aloud',
-              icon: const Icon(Icons.volume_up_outlined),
-              onPressed: () async {
-                await _flush();
-                if (context.mounted) await showReadAloud(context, _text.text);
-              },
-            ),
+          // Always here: without a voice to read with, tapping it says how to get one.
+          IconButton(
+            tooltip: 'Read aloud',
+            icon: const Icon(Icons.volume_up_outlined),
+            onPressed: () async {
+              await _flush();
+              if (context.mounted) await readAloudOrOffer(context, _text.text);
+            },
+          ),
           PopupMenuButton<String>(
             tooltip: 'AI',
             icon: const Icon(Icons.auto_awesome_outlined),
@@ -852,6 +852,7 @@ class _NoteScreenState extends State<NoteScreen> {
                   onAction: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const SettingsScreen())),
                   margin: const EdgeInsets.only(bottom: 12),
                 ),
+              if (note != null) TitlesCard(note: note),
               if (journal != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: journal),
               if (hasProperties(_text.text)) _Properties(text: _text.text, onEdit: readOnly ? null : _properties),
               // Task links are numbered over the whole note, and footnotes and comments read across it, before it
@@ -892,7 +893,10 @@ class _NoteScreenState extends State<NoteScreen> {
                       part: part,
                       playback: audio == null ? null : _playback(audio, note?.folder),
                       loadWords: () async => audio == null ? null : _wordsFor(audio, note?.folder),
-                      onCleanUp: readOnly || audio == null ? null : (choice) => _cleanUp(audio, choice),
+                      // Clean up is Docket's speech model's: not with Android's own speech to text.
+                      onCleanUp: readOnly || audio == null || ServicesScope.of(context).androidStt
+                          ? null
+                          : (choice) => _cleanUp(audio, choice),
                     ),
                 },
               if (backlinks.isNotEmpty) ...[

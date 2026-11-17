@@ -92,6 +92,16 @@ later (and a card on the notes list until something is there):
 - **Notes models** (about 790 MB): Title, Gist, EmbeddingGemma 2 and
   Mirage: titles, tags, and search by meaning.
 
+Speech can be Android's own instead (the intro's downloads step, or
+Settings › Speech): its on-device speech to text (Android 13+, in the
+language set there, the phone's by default; no language detection, Clean up
+or live words) and its text-to-speech with the phone's offline voices only
+(`AndroidReader.kt`), so neither needs a download and nothing leaves the
+phone. Docket's models stay the default. A feature whose model is missing
+says so where it is: reading aloud offers the TTS model or Android's voice,
+a note left untitled or untagged offers the notes models, and Settings marks
+the switches that need them.
+
 Each model comes from Hugging Face at its pinned revision and is kept only
 when its sizes and sha256 match (`OfflineModels.kt`); a stopped download
 goes on where it left off. Downloads run one after another in the
