@@ -424,8 +424,9 @@ class _SearchScreenState extends State<SearchScreen> {
           const SizedBox(height: 14),
           Text(
             ready
-                ? 'Finds notes by meaning, not just words. Try:'
-                : 'Needs the notes models.',
+                ? 'Words that are not in the note still find it: a recording by what was said, a picture by what is '
+                    'in it. Try one:'
+                : 'Words that are not in the note still find it, once the notes models are on the phone.',
             style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.5),
           ),
           const SizedBox(height: 14),

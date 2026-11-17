@@ -846,7 +846,8 @@ class _NoteScreenState extends State<NoteScreen> {
                 TipCard(
                   id: 'read-aloud',
                   title: 'Listen instead',
-                  text: 'The speaker reads the note to you. Voice and speed: Settings.',
+                  text: 'The speaker up top reads the note to you, on the phone, with no internet. Pick the voice and '
+                      'the speed in Settings.',
                   action: 'Settings',
                   onAction: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const SettingsScreen())),
                   margin: const EdgeInsets.only(bottom: 12),

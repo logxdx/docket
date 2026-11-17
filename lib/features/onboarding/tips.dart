@@ -32,7 +32,8 @@ Future<bool> showMicPrimer(BuildContext context) async {
             Text('Docket needs the microphone', style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 8),
             Text(
-              'To record notes. Audio stays on this phone.',
+              'To record your notes. The audio and its transcript stay on this phone, in your notes. Recording keeps '
+              'going with the screen off.',
               style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.5),
             ),
             const SizedBox(height: 22),
