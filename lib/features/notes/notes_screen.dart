@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../app/attachments.dart';
+import '../../app/downloads.dart';
 import '../../app/recordings.dart';
 import '../../app/services.dart';
 import '../../app/theme.dart';
@@ -21,6 +22,7 @@ import '../../core/voice/recording.dart';
 import '../settings/settings_screen.dart';
 import '../settings/settings_tiles.dart';
 import '../settings/models_screen.dart';
+import '../onboarding/tips.dart';
 import 'graph_screen.dart';
 import 'navigation.dart';
 import 'note_tools.dart';
@@ -98,11 +100,32 @@ class _NotesScreenState extends State<NotesScreen> {
 
   /// + : a note, or a note from a picture or an audio file.
   Future<void> _add() async {
+    // The first time: what + is for, said once (seeing it is enough).
+    final tip = _s.tipDue('plus');
+    if (tip) _s.tipSeen('plus');
     final picked = await showModalBottomSheet<Future<void> Function()>(
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (tip)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.inverseSurface,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Text(
+                'Everything new starts here. A picture becomes a note you can write about; an audio file is '
+                'transcribed, titled and tagged like a recording.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onInverseSurface,
+                      height: 1.4,
+                    ),
+              ),
+            ),
           for (final (icon, label, hint, action) in [
             (Icons.edit_note_rounded, 'Note', 'Write', _new),
             (Icons.image_outlined, 'Picture', 'A note holding a picture from the phone', _newPicture),
@@ -648,6 +671,14 @@ class _NotesScreenState extends State<NotesScreen> {
                   ]),
                 ),
               if (!_flat && _folder.isNotEmpty) _Breadcrumb(folder: _folder, onGo: _go),
+              // A new notebook: how to start, once.
+              if (!readOnly && !_book.loading && _book.notes.isEmpty)
+                const TipCard(
+                  id: 'first-note',
+                  title: 'Your first note',
+                  text: 'Tap the mic and talk: Docket writes it down. Or tap + to write, or add a picture or an audio file.',
+                  margin: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                ),
               if (_book.loading) const LinearProgressIndicator(minHeight: 2),
               Expanded(
                 child: shown.isEmpty
@@ -958,8 +989,9 @@ Future<String?> pickFolder(BuildContext context, Notebook book, {required String
   );
 }
 
-/// The Desert Ant models, offered once while none is on the phone (the app no longer carries them): download
-/// them all, or not now (Settings › On-device models has them any time). While they come down, how far along.
+/// The Desert Ant models while they come down (how far along, or why they wait: Wi-Fi, no connection, a problem),
+/// and offered while none is on the phone and none is coming (Later in the intro): download them all, or not now
+/// (Settings › On-device models has them any time).
 class _ModelsNudge extends StatefulWidget {
   const _ModelsNudge({required this.services});
 
@@ -971,83 +1003,65 @@ class _ModelsNudge extends StatefulWidget {
 
 class _ModelsNudgeState extends State<_ModelsNudge> {
   @override
-  void initState() {
-    super.initState();
-    widget.services.ant.status.addListener(_firstOpen);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _firstOpen());
-  }
-
-  @override
-  void dispose() {
-    widget.services.ant.status.removeListener(_firstOpen);
-    super.dispose();
-  }
-
-  /// The first time the app is opened with no models on the phone: the download screen, once.
-  void _firstOpen() {
-    final s = widget.services;
-    final status = s.ant.status.value;
-    if (!mounted || s.settings.get('models.welcomed') == 'yes') return;
-    if (status.downloads.isEmpty || status.downloads.keys.any(status.has)) return;
-    s.settings.set('models.welcomed', 'yes');
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const ModelsScreen(welcome: true)));
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
     final s = widget.services;
     final ant = s.ant;
     final theme = Theme.of(context);
-    return ValueListenableBuilder(
-      valueListenable: ant.status,
-      builder: (context, status, _) => ValueListenableBuilder<Map<String, double>>(
-        valueListenable: ant.downloading,
-        builder: (context, downloading, _) {
-          if (downloading.isNotEmpty) {
-            final total = status.downloads.values.fold(0, (n, b) => n + b);
-            final done = status.downloads.entries.fold(0.0, (n, e) =>
-                n + (status.has(e.key) ? e.value : (downloading[e.key] ?? 0) * e.value));
-            final f = total == 0 ? 0.0 : done / total;
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Downloading the models: ${(f * 100).round()}%', style: theme.textTheme.bodySmall),
-                const SizedBox(height: 6),
-                LinearProgressIndicator(value: f, minHeight: 3),
-              ]),
-            );
-          }
-          final none = status.downloads.isNotEmpty && !status.downloads.keys.any(status.has);
-          if (!none || s.settings.get('models.nudged') == 'yes') return const SizedBox.shrink();
+    return ListenableBuilder(
+      listenable: Listenable.merge([ant.status, ant.downloading, s.downloads]),
+      builder: (context, _) {
+        final status = ant.status.value;
+        final downloading = ant.downloading.value;
+        if (const [DownloadState.waitingForWifi, DownloadState.offline, DownloadState.failed].contains(s.downloads.state)) {
+          return const DownloadNotice(padding: EdgeInsets.fromLTRB(16, 8, 16, 0));
+        }
+        if (downloading.isNotEmpty) {
+          final total = status.downloads.values.fold(0, (n, b) => n + b);
+          final done = status.downloads.entries.fold(0.0, (n, e) =>
+              n + (status.has(e.key) ? e.value : (downloading[e.key] ?? 0) * e.value));
+          final f = total == 0 ? 0.0 : done / total;
           return Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: Card(
-              margin: EdgeInsets.zero,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Transcripts, reading aloud, titles and search', style: theme.textTheme.titleSmall),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Download the models (${sizeLabel(status.missingBytes)}, once). They run on this phone; '
-                    'nothing you record or write is sent.',
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.4),
-                  ),
-                  Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-                    TextButton(
-                      onPressed: () => setState(() => s.settings.set('models.nudged', 'yes')),
-                      child: const Text('Not now'),
-                    ),
-                    FilledButton.tonal(onPressed: () => downloadAll(context, ant), child: const Text('Download')),
-                  ]),
-                ]),
-              ),
-            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Downloading the models: ${(f * 100).round()}%', style: theme.textTheme.bodySmall),
+              const SizedBox(height: 6),
+              LinearProgressIndicator(value: f, minHeight: 3),
+            ]),
           );
-        },
-      ),
+        }
+        final none = status.downloads.isNotEmpty && !status.downloads.keys.any(status.has);
+        if (!none || s.downloads.wanted.isNotEmpty || s.settings.get('models.nudged') == 'yes') {
+          return const SizedBox.shrink();
+        }
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Card(
+            margin: EdgeInsets.zero,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Transcripts, reading aloud, titles and search', style: theme.textTheme.titleSmall),
+                const SizedBox(height: 4),
+                Text(
+                  'Download the models (${sizeLabel(status.missingBytes)}, once). They run on this phone; '
+                  'nothing you record or write is sent.',
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.4),
+                ),
+                Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                  TextButton(
+                    onPressed: () => setState(() => s.settings.set('models.nudged', 'yes')),
+                    child: const Text('Not now'),
+                  ),
+                  FilledButton.tonal(
+                    onPressed: () => getModels(context, status.downloads.keys),
+                    child: const Text('Download'),
+                  ),
+                ]),
+              ]),
+            ),
+          ),
+        );
+      },
     );
   }
 }

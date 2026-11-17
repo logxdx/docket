@@ -15,9 +15,14 @@ import '../../app/theme.dart';
 import '../../core/ai/model.dart';
 import '../../core/ai/prompts.dart';
 import '../../core/notes/read_aloud.dart' show readingVoiceRegions;
+import '../notes/note_screen.dart';
+import '../notes/record_screen.dart';
+import '../notes/search_screen.dart';
+import '../onboarding/onboarding_screen.dart';
 import 'models_screen.dart';
 
 part 'ai_screen.dart';
+part 'what_docket_can_do.dart';
 
 /// The app's version, as pubspec.yaml has it.
 const appVersion = '0.3.0';
@@ -83,6 +88,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _Group('Appearance', [
               _Line(label: 'Theme', child: _ThemeSwitch(appearance: _s.appearance)),
               _Line(label: 'Accent', child: _AccentDots(appearance: _s.appearance)),
+            ]),
+            _Group('Help', [
+              _Row('What Docket can do',
+                  onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const _WhatDocketCanDo()))),
+              _Row('Replay the intro', onTap: () async {
+                await Navigator.push(
+                    context, MaterialPageRoute<void>(builder: (_) => const OnboardingScreen(replay: true)));
+                if (mounted) setState(() {});
+              }),
+              _Switch('Show tips', _s.tipsOn, (on) => setState(() => _s.setTips(on))),
             ]),
             _Group('More', [
               _Row(

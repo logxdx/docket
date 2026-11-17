@@ -29,8 +29,17 @@ class Settings {
 
   String? get(String key) => _values[key];
 
+  /// Nothing set yet: a fresh install.
+  bool get isEmpty => _values.isEmpty;
+
   void set(String key, String value) {
     _values[key] = value;
+    unawaited(_save());
+  }
+
+  /// Forget every setting [which] picks.
+  void clear(bool Function(String key) which) {
+    _values.removeWhere((key, _) => which(key));
     unawaited(_save());
   }
 

@@ -45,6 +45,9 @@ class ModelStatus {
   bool has(String id) => ready.contains(id);
 }
 
+/// The phone's connection: [metered] is mobile data (or a hotspot that says it costs).
+typedef Network = ({bool online, bool metered});
+
 /// A recording read and kept on the native side for the models.
 typedef Prepared = ({String id, Duration length, bool enhanced, String? problem});
 
@@ -263,6 +266,25 @@ class DesertAnt {
       return await _permissions.invokeMethod<bool>('microphone') ?? false;
     } on MissingPluginException {
       return false;
+    }
+  }
+
+  /// Whether recording is allowed already; never asks.
+  Future<bool> microphoneGranted() async {
+    try {
+      return await _permissions.invokeMethod<bool>('micGranted') ?? false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  /// The connection now: online at all, and on mobile data (metered) or not.
+  Future<Network> network() async {
+    try {
+      final m = await _permissions.invokeMethod<Map>('network');
+      return (online: m?['online'] == true, metered: m?['metered'] == true);
+    } on MissingPluginException {
+      return (online: true, metered: false);
     }
   }
 

@@ -34,6 +34,7 @@ import 'note_text.dart';
 import 'note_tools.dart';
 import '../../core/notes/fuzzy.dart';
 import '../../core/notes/obsidian.dart' show countWords, forReading;
+import '../onboarding/tips.dart';
 import 'notes_screen.dart' show pickFolder;
 import 'read_aloud_sheet.dart';
 import 'record_screen.dart';
@@ -142,6 +143,9 @@ class _NoteScreenState extends State<NoteScreen> {
   late Notebook _book;
 
   Summaries? _summaries;
+
+  /// The read-aloud tip is due on this note (decided when it opens).
+  var _readAloudTip = false;
   Recordings? _recordings;
   late Enricher _enricher;
 
@@ -156,7 +160,14 @@ class _NoteScreenState extends State<NoteScreen> {
       _hadText = !Notebook.isBlank(_saved);
       _editing = !_book.readOnly && (widget.startEditing || _saved.trim().isEmpty);
     }
-    if (_summaries == null) ServicesScope.of(context).opened(_path);
+    if (_summaries == null) {
+      final s = ServicesScope.of(context);
+      s.opened(_path);
+      // The third note opened, with reading aloud on the phone: the tip about it, once.
+      final count = (int.tryParse(s.settings.get('notes.openedCount') ?? '') ?? 0) + 1;
+      if (count <= 3) s.settings.set('notes.openedCount', '$count');
+      _readAloudTip = count >= 3 && s.ant.status.value.speech && s.tipDue('read-aloud');
+    }
     _summaries ??= ServicesScope.of(context).summaries..addListener(_summaryLanded);
     _recordings ??= ServicesScope.of(context).recordings..addListener(_recordingLanded);
   }
@@ -831,6 +842,16 @@ class _NoteScreenState extends State<NoteScreen> {
               ),
             ])
           : ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 32), children: [
+              if (_readAloudTip)
+                TipCard(
+                  id: 'read-aloud',
+                  title: 'Listen instead',
+                  text: 'The speaker up top reads the note to you, on the phone, with no internet. Pick the voice and '
+                      'the speed in Settings.',
+                  action: 'Settings',
+                  onAction: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const SettingsScreen())),
+                  margin: const EdgeInsets.only(bottom: 12),
+                ),
               if (journal != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: journal),
               if (hasProperties(_text.text)) _Properties(text: _text.text, onEdit: readOnly ? null : _properties),
               // Task links are numbered over the whole note, and footnotes and comments read across it, before it

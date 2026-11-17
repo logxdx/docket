@@ -13,6 +13,7 @@ import '../../app/theme.dart';
 import '../../core/notes/finder.dart';
 import '../../core/notes/notebook.dart';
 import '../../core/voice/spoken.dart';
+import '../settings/models_screen.dart';
 import 'markdown_view.dart';
 import 'note_screen.dart';
 
@@ -262,7 +263,9 @@ class _SearchScreenState extends State<SearchScreen> {
           controller: _query,
           autofocus: widget.query.isEmpty,
           textInputAction: TextInputAction.search,
-          onChanged: (_) {
+          onChanged: (text) {
+            // Searched once: the tip about search by meaning has done its job.
+            if (text.trim().isNotEmpty) _s.tipSeen('search');
             setState(() {});
             _searchMeaning();
           },
@@ -286,10 +289,12 @@ class _SearchScreenState extends State<SearchScreen> {
         ),
       ),
       body: ListenableBuilder(
-        listenable: Listenable.merge([_book, _s.meaning]),
+        listenable: Listenable.merge([_book, _s.meaning, _s.ant.status, _s.ant.downloading, _s.downloads]),
         builder: (context, _) {
           final words = searchVault(_book, _query.text, _filters, tagsOf: _s.meaning.tagsOf);
           final meant = _meantFor.isNotEmpty && _meantFor == _query.text;
+          // Nothing searched yet, ever: the tip about search by meaning heads the list.
+          final tip = _query.text.trim().isEmpty && _s.tipDue('search');
           final hits = meant
               ? withMeaning(_book, words, _filters, passages: _meantPassages, pictures: _meantPictures)
               : words;
@@ -365,7 +370,7 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
             ),
             Expanded(
-              child: hits.isEmpty
+              child: hits.isEmpty && !tip
                   ? Center(
                       child: Padding(
                         padding: const EdgeInsets.all(32),
@@ -380,12 +385,83 @@ class _SearchScreenState extends State<SearchScreen> {
                     )
                   : ListView.builder(
                       padding: const EdgeInsets.fromLTRB(12, 0, 12, 32),
-                      itemCount: hits.length,
-                      itemBuilder: (context, i) => _hit(context, hits[i], top: true),
+                      // Before the first search, the tip about search by meaning comes first.
+                      itemCount: hits.length + (tip ? 1 : 0),
+                      itemBuilder: (context, i) => tip
+                          ? (i == 0 ? _meaningTip(context) : _hit(context, hits[i - 1], top: true))
+                          : _hit(context, hits[i], top: true),
                     ),
             ),
           ]);
         },
+      ),
+    );
+  }
+
+  /// Before the first search: words that are not in a note still find it. Without the notes models, how to get them.
+  Widget _meaningTip(BuildContext context) {
+    final theme = Theme.of(context);
+    final accent = Accent.of(context);
+    final status = _s.ant.status.value;
+    final notes = modelGroup('Notes models');
+    final ready = notes.ready(status);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+        decoration: BoxDecoration(color: theme.colorScheme.surfaceContainer, borderRadius: BorderRadius.circular(22)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(color: accent.withValues(alpha: 0.16), shape: BoxShape.circle),
+              child: Icon(Icons.manage_search_rounded, color: accent, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Text('Search by what you mean', style: theme.textTheme.titleMedium)),
+          ]),
+          const SizedBox(height: 14),
+          Text(
+            ready
+                ? 'Words that are not in the note still find it: a recording by what was said, a picture by what is '
+                    'in it. Try one:'
+                : 'Words that are not in the note still find it, once the notes models are on the phone.',
+            style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.5),
+          ),
+          const SizedBox(height: 14),
+          if (ready)
+            for (final example in const ['present for a friend', 'water leak', 'dog in the park'])
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48), alignment: Alignment.centerLeft),
+                  onPressed: () {
+                    _s.tipSeen('search');
+                    _query.text = example;
+                    setState(() {});
+                    _searchMeaning();
+                  },
+                  child: Text(example),
+                ),
+              )
+          else
+            FilledButton(
+              onPressed: notes.coming(_s.ant.downloading.value, _s.downloads.wanted)
+                  ? null
+                  : () => getModels(context, notes.offered(status)),
+              child: Text(notes.coming(_s.ant.downloading.value, _s.downloads.wanted)
+                  ? 'Downloading the notes models'
+                  : 'Download notes models · ${sizeLabel(notes.missing(status))}'),
+            ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () => setState(() => _s.tipSeen('search')),
+              child: const Text('Got it'),
+            ),
+          ),
+        ]),
       ),
     );
   }

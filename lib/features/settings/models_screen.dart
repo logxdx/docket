@@ -1,14 +1,15 @@
 /// The on-device models, downloaded when wanted (the app carries none): three things to download, each what it is
 /// for, its size, and download, stop or remove. Each model comes from Hugging Face once (its pinned version, every
-/// file checked), then runs on the phone. Shown by itself the first time the app is opened ([welcome]).
+/// file checked), then runs on the phone. Downloads go over Wi-Fi unless mobile data is allowed (asked first), and
+/// carry on by themselves when the connection comes back (lib/app/downloads.dart).
 library;
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../app/desert_ant.dart';
+import '../../app/downloads.dart';
 import '../../app/services.dart';
 import '../../app/theme.dart';
 
@@ -27,7 +28,9 @@ class ModelGroup {
   int missing(ModelStatus s) => offered(s).where((id) => !s.has(id)).fold(0, (n, id) => n + s.downloads[id]!);
 
   bool ready(ModelStatus s) => offered(s).isNotEmpty && offered(s).every(s.has);
-  bool downloading(Map<String, double> d) => models.any(d.containsKey);
+
+  /// Coming down now, or waiting its turn.
+  bool coming(Map<String, double> d, List<String> wanted) => models.any((id) => d.containsKey(id) || wanted.contains(id));
 
   /// How much of it is on the phone (0..1), by bytes, counting what is coming down.
   double progress(ModelStatus s, Map<String, double> d) {
@@ -47,104 +50,209 @@ const modelGroups = [
   ModelGroup('Notes models', 'Titles, tags and search by meaning', ['title', 'gist', 'embeddinggemma', 'mirage']),
 ];
 
+/// The group [name] is ('STT model', 'TTS model', 'Notes models').
+ModelGroup modelGroup(String name) => modelGroups.firstWhere((g) => g.name == name);
+
 String sizeLabel(int bytes) =>
     bytes >= 1e9 ? '${(bytes / 1e9).toStringAsFixed(1)} GB' : '${(bytes / 1e6).round()} MB';
 
-/// Download [group] (every model of it not on the phone yet), one after another; a problem is said and stops it.
-Future<void> downloadGroup(BuildContext context, DesertAnt ant, ModelGroup group) async {
-  final messenger = ScaffoldMessenger.of(context);
-  for (final id in group.offered(ant.status.value)) {
-    if (ant.status.value.has(id) || ant.downloading.value.containsKey(id)) continue;
-    try {
-      await ant.download(id);
-    } on PlatformException catch (e) {
-      if (e.message?.contains('stopped') != true) {
-        messenger.showSnackBar(SnackBar(content: Text('${group.name}: ${e.message ?? 'not downloaded'}')));
-      }
-      return;
+/// Download the models [ids] not on the phone yet, in the background. On mobile data, and the user has not said
+/// what they want, they are asked first; false when they dismissed the question.
+Future<bool> getModels(BuildContext context, Iterable<String> ids) async {
+  final s = ServicesScope.of(context);
+  final downloads = s.downloads;
+  final status = s.ant.status.value;
+  final wanted = [for (final id in ids) if (status.downloads.containsKey(id) && !status.has(id)) id];
+  if (wanted.isEmpty) return true;
+  var mobile = false;
+  if (downloads.mobileData == MobileData.ask) {
+    final net = await s.ant.network();
+    if (net.online && net.metered) {
+      if (!context.mounted) return false;
+      final bytes = wanted.fold(0, (n, id) => n + status.downloads[id]!);
+      final choice = await askMobileData(context, bytes);
+      if (choice == null) return false;
+      mobile = choice;
     }
   }
+  downloads.want(wanted, mobile: mobile);
+  return true;
 }
 
-/// Download everything not on the phone yet, one thing after another.
-Future<void> downloadAll(BuildContext context, DesertAnt ant) async {
-  for (final g in modelGroups) {
-    if (!context.mounted) return;
-    await downloadGroup(context, ant, g);
+/// Off Wi-Fi: use mobile data for [bytes] (true), or wait for Wi-Fi (false); null when dismissed. "Don't ask again"
+/// keeps the answer.
+Future<bool?> askMobileData(BuildContext context, int bytes) async {
+  final downloads = ServicesScope.of(context).downloads;
+  var remember = false;
+  final choice = await showDialog<bool>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setState) => AlertDialog(
+        icon: Icon(Icons.signal_cellular_alt_rounded, color: Accent.of(context)),
+        title: const Text('Use mobile data?'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('You\'re not on Wi-Fi. The download is ${sizeLabel(bytes)}, which may count against your data plan.'),
+          const SizedBox(height: 8),
+          CheckboxListTile(
+            value: remember,
+            onChanged: (on) => setState(() => remember = on ?? false),
+            title: const Text('Don\'t ask again'),
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Use mobile data')),
+          FilledButton(onPressed: () => Navigator.pop(context, false), child: const Text('Wait for Wi-Fi')),
+        ],
+      ),
+    ),
+  );
+  if (choice != null && remember) downloads.mobileData = choice ? MobileData.allowed : MobileData.never;
+  return choice;
+}
+
+/// Why downloads are not coming down (waiting for Wi-Fi, no connection, a problem) and what to do about it;
+/// nothing while they come down or when there are none.
+class DownloadNotice extends StatelessWidget {
+  const DownloadNotice({super.key, this.padding = EdgeInsets.zero});
+
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final downloads = ServicesScope.of(context).downloads;
+    final theme = Theme.of(context);
+    final accent = Accent.of(context);
+    return ListenableBuilder(
+      listenable: downloads,
+      builder: (context, _) {
+        final (icon, title, text, action, onAction) = switch (downloads.state) {
+          DownloadState.waitingForWifi => (
+              Icons.wifi_rounded,
+              'Waiting for Wi-Fi',
+              'The download starts by itself on Wi-Fi.',
+              'Use mobile data',
+              downloads.useMobileData,
+            ),
+          DownloadState.offline => (
+              Icons.wifi_off_rounded,
+              'No internet connection',
+              'The download picks up where it stopped, by itself when you are back online.',
+              'Retry',
+              downloads.retry,
+            ),
+          DownloadState.failed => (
+              Icons.error_outline_rounded,
+              'Download stopped',
+              downloads.problem ?? 'Not downloaded.',
+              'Retry',
+              downloads.retry,
+            ),
+          _ => (null, '', '', '', null),
+        };
+        if (icon == null) return const SizedBox.shrink();
+        return Padding(
+          padding: padding,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(16, 14, 8, 6),
+            decoration: BoxDecoration(color: accent.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(18)),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Padding(padding: const EdgeInsets.only(top: 2), child: Icon(icon, color: accent, size: 22)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(title, style: theme.textTheme.titleSmall),
+                  const SizedBox(height: 2),
+                  Text(text, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.4)),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(onPressed: onAction, child: Text(action)),
+                  ),
+                ]),
+              ),
+            ]),
+          ),
+        );
+      },
+    );
   }
 }
 
 class ModelsScreen extends StatelessWidget {
-  const ModelsScreen({super.key, this.welcome = false});
-
-  /// The first time the app is opened: said as a welcome, with a way to leave it for later.
-  final bool welcome;
+  const ModelsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final ant = ServicesScope.of(context).ant;
+    final s = ServicesScope.of(context);
+    final ant = s.ant;
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     return Scaffold(
-      appBar: AppBar(title: Text(welcome ? 'Download the models' : 'On-device models')),
-      body: ValueListenableBuilder<ModelStatus>(
-        valueListenable: ant.status,
-        builder: (context, status, _) => ValueListenableBuilder<Map<String, double>>(
-          valueListenable: ant.downloading,
-          builder: (context, downloading, _) {
-            final groups = [for (final g in modelGroups) if (g.offered(status).isNotEmpty) g];
-            final missing = groups.fold(0, (n, g) => n + g.missing(status));
-            return ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 32), children: [
-              Text(
-                welcome
-                    ? 'Docket runs everything on this phone. Download the models once; nothing you record or write '
-                        'is sent anywhere.'
-                    : 'Downloaded once, then run on this phone.',
-                style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.45),
+      appBar: AppBar(title: const Text('On-device models')),
+      body: ListenableBuilder(
+        listenable: Listenable.merge([ant.status, ant.downloading, s.downloads]),
+        builder: (context, _) {
+          final status = ant.status.value;
+          final downloading = ant.downloading.value;
+          final wanted = s.downloads.wanted;
+          final groups = [for (final g in modelGroups) if (g.offered(status).isNotEmpty) g];
+          final missing = groups.fold(0, (n, g) => n + g.missing(status));
+          final coming = groups.any((g) => g.coming(downloading, wanted));
+          return ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 32), children: [
+            Text('Downloaded once, then run on this phone.',
+                style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.45)),
+            const SizedBox(height: 16),
+            if (groups.isEmpty)
+              Text('This build carries every model.', style: theme.textTheme.bodyMedium)
+            else if (missing > 0)
+              FilledButton.icon(
+                onPressed: coming
+                    ? null
+                    : () => unawaited(getModels(context, [for (final g in groups) ...g.offered(status)])),
+                icon: const Icon(Icons.download_rounded),
+                label: Text('Download all · ${sizeLabel(missing)}'),
+              )
+            else
+              Row(children: [
+                Icon(Icons.check_circle_rounded, color: Accent.of(context)),
+                const SizedBox(width: 8),
+                Text('All on this phone', style: theme.textTheme.titleSmall),
+              ]),
+            const DownloadNotice(padding: EdgeInsets.only(top: 12)),
+            const SizedBox(height: 12),
+            for (final g in groups) _GroupCard(group: g, status: status, downloading: downloading, wanted: wanted),
+            const SizedBox(height: 8),
+            Card(
+              margin: const EdgeInsets.symmetric(vertical: 5),
+              child: SwitchListTile(
+                title: const Text('Use mobile data'),
+                subtitle: const Text('Off: downloads wait for Wi-Fi, or ask first'),
+                value: s.downloads.mobileData == MobileData.allowed,
+                onChanged: (on) => s.downloads.mobileData = on ? MobileData.allowed : MobileData.ask,
               ),
-              const SizedBox(height: 16),
-              if (groups.isEmpty)
-                Text('This build carries every model.', style: theme.textTheme.bodyMedium)
-              else if (missing > 0)
-                FilledButton.icon(
-                  onPressed: downloading.isEmpty ? () => unawaited(downloadAll(context, ant)) : null,
-                  icon: const Icon(Icons.download_rounded),
-                  label: Text('Download all · ${sizeLabel(missing)}'),
-                )
-              else
-                Row(children: [
-                  Icon(Icons.check_circle_rounded, color: Accent.of(context)),
-                  const SizedBox(width: 8),
-                  Text('All on this phone', style: theme.textTheme.titleSmall),
-                ]),
-              if (welcome && missing > 0)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton(onPressed: () => Navigator.pop(context), child: const Text('Later')),
-                ),
-              const SizedBox(height: 12),
-              for (final g in groups) _GroupCard(group: g, status: status, downloading: downloading),
-            ]);
-          },
-        ),
+            ),
+          ]);
+        },
       ),
     );
   }
 }
 
 class _GroupCard extends StatelessWidget {
-  const _GroupCard({required this.group, required this.status, required this.downloading});
+  const _GroupCard({required this.group, required this.status, required this.downloading, required this.wanted});
 
   final ModelGroup group;
   final ModelStatus status;
   final Map<String, double> downloading;
+  final List<String> wanted;
 
   @override
   Widget build(BuildContext context) {
-    final ant = ServicesScope.of(context).ant;
+    final s = ServicesScope.of(context);
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
-    final busy = group.downloading(downloading);
+    final busy = group.coming(downloading, wanted);
     final ready = group.ready(status);
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 5),
@@ -161,26 +269,24 @@ class _GroupCard extends StatelessWidget {
                 Text(
                   [
                     sizeLabel(ready ? group.size(status) : group.missing(status)),
-                    if (ready) 'on this phone' else if (busy) 'downloading',
+                    if (ready)
+                      'on this phone'
+                    else if (group.models.any(downloading.containsKey))
+                      'downloading'
+                    else if (busy)
+                      'waiting',
                   ].join(' · '),
                   style: theme.textTheme.labelMedium?.copyWith(color: muted),
                 ),
               ]),
             ),
             if (busy)
-              TextButton(
-                onPressed: () {
-                  for (final id in group.models.where(downloading.containsKey)) {
-                    unawaited(ant.cancelDownload(id));
-                  }
-                },
-                child: const Text('Stop'),
-              )
+              TextButton(onPressed: () => unawaited(s.downloads.stop(group.models)), child: const Text('Stop'))
             else if (ready)
-              TextButton(onPressed: () => _remove(context, ant), child: const Text('Remove'))
+              TextButton(onPressed: () => _remove(context, s.ant), child: const Text('Remove'))
             else
               FilledButton.tonal(
-                onPressed: downloading.isEmpty ? () => unawaited(downloadGroup(context, ant, group)) : null,
+                onPressed: () => unawaited(getModels(context, group.offered(status))),
                 child: const Text('Download'),
               ),
           ]),

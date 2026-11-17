@@ -167,6 +167,13 @@ class Recordings extends ChangeNotifier {
     unawaited(_next());
   }
 
+  /// Try every failed one again (the STT model they waited for is here).
+  void retryFailed() {
+    for (final id in _failed.keys.toList()) {
+      retry(id);
+    }
+  }
+
   /// Try a failed one again.
   void retry(String id) {
     if (_running?.id == id || _queue.any((j) => j.id == id)) return;

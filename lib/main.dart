@@ -6,6 +6,7 @@ import 'package:gpt_markdown/gpt_markdown.dart';
 import 'app/services.dart';
 import 'app/theme.dart';
 import 'features/notes/notes_screen.dart';
+import 'features/onboarding/onboarding_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,6 +28,9 @@ class _NotesAppState extends State<NotesApp> {
   /// The index is written when the app goes to the background, so the next
   /// start does not read every note again.
   late final AppLifecycleListener _lifecycle;
+
+  /// Whether this run starts with the intro: decided once, so a theme change does not decide it again.
+  late final bool _intro = widget.services.introDue;
 
   @override
   void initState() {
@@ -56,7 +60,8 @@ class _NotesAppState extends State<NotesApp> {
             darkTheme: buildTheme(Brightness.dark, seed: seed, black: appearance.choice == ThemeChoice.amoled),
             themeMode: appearance.mode,
             builder: (context, child) => GptMarkdownTheme(gptThemeData: markdownTheme(Theme.of(context)), child: child!),
-            home: const NotesScreen(),
+            // A fresh install starts with the intro; an update goes straight to the notes.
+            home: _intro ? const OnboardingScreen() : const NotesScreen(),
           );
         },
       ),

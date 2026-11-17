@@ -16,6 +16,7 @@ import '../core/notes/notebook.dart';
 import '../core/notes/vault.dart';
 import '../core/voice/summaries.dart';
 import 'desert_ant.dart';
+import 'downloads.dart';
 import 'enricher.dart';
 import 'meaning_index.dart';
 import 'recordings.dart';
@@ -177,6 +178,16 @@ class Services {
 
   void setAutoEnabled(String feature, bool on) => settings.set('auto.$feature', on ? 'on' : 'off');
 
+  /// Model downloads in the background: Wi-Fi only unless allowed, carrying on by themselves (lib/app/downloads.dart).
+  late final downloads = Downloads(
+    fetch: ant.download,
+    cancel: ant.cancelDownload,
+    has: (id) => ant.status.value.has(id),
+    network: ant.network,
+    read: settings.get,
+    write: settings.set,
+  );
+
   /// Put the models in place and pick up recordings an earlier run left.
   Future<void> startModels() async {
     await ant.prepare();
@@ -185,6 +196,31 @@ class Services {
     notebook.addListener(meaning.schedule);
     ant.status.addListener(meaning.schedule);
     meaning.schedule(const Duration(seconds: 10));
+    // Recordings that waited for the STT model are transcribed once it is here.
+    var stt = ant.status.value.phonon;
+    ant.status.addListener(() {
+      final now = ant.status.value.phonon;
+      if (now && !stt) recordings.retryFailed();
+      stt = now;
+    });
+  }
+
+  /// The intro: shown on a fresh install, and from Settings › Help. An update (settings already there) skips it.
+  bool get introDue => settings.isEmpty || (settings.get('intro.done') != 'yes' && settings.get('intro.started') == 'yes');
+
+  void introDone() => settings.set('intro.done', 'yes');
+
+  /// Tips, each shown once: [tipDue] while on and not seen yet.
+  bool get tipsOn => settings.get('tips') != 'off';
+
+  bool tipDue(String id) => tipsOn && settings.get('tip.$id') != 'seen';
+
+  void tipSeen(String id) => settings.set('tip.$id', 'seen');
+
+  /// Tips on (every one shown again once) or off.
+  void setTips(bool on) {
+    settings.set('tips', on ? 'on' : 'off');
+    if (on) settings.clear((key) => key.startsWith('tip.'));
   }
 
   Future<String> _summarise(String transcript) async {

@@ -4,6 +4,8 @@
          and the Desert Ant SDK's anonymous usage count, sent when a network happens to exist. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Model downloads: whether the connection is Wi-Fi or mobile data (Wi-Fi only unless the user says). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <!-- RecordingService: recording on with the screen locked, and transcribing at full speed with the app left. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>

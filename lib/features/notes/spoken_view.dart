@@ -15,6 +15,8 @@ import '../../app/services.dart';
 import '../../app/theme.dart';
 import '../../core/voice/recording.dart';
 import '../../core/voice/spoken.dart';
+import '../onboarding/tips.dart';
+import '../settings/models_screen.dart';
 import 'audio_player.dart';
 
 /// What Clean up does to a recording, each step only if on: [clean] the audio (Clear), [transcribe] it again (in
@@ -273,6 +275,15 @@ class _SpokenTranscriptState extends State<SpokenTranscript> with SingleTickerPr
             padding: const EdgeInsets.only(top: 2, left: 30),
             child: Text(about, style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
           ),
+        if (widget.onCleanUp != null)
+          const TipCard(
+            id: 'clean-up',
+            title: 'Clean it up',
+            text: 'Tap the wand to take out the noise, mark who said what and time each word. Your original audio '
+                'is kept.',
+            more: 'Runs on this phone. Summarise and Tidy up need an AI server: Settings › AI.',
+            margin: EdgeInsets.only(top: 10),
+          ),
         const SizedBox(height: 12),
         SelectionArea(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children)),
       ]),
@@ -283,6 +294,8 @@ class _SpokenTranscriptState extends State<SpokenTranscript> with SingleTickerPr
 
   /// Choose what to do to the recording, and do it.
   Future<void> _cleanUp() async {
+    // Found: its tip is not needed any more.
+    ServicesScope.of(context).tipSeen('clean-up');
     final status = ServicesScope.of(context).ant.status.value;
     final choice = await showModalBottomSheet<CleanUpChoice>(
       context: context,
@@ -319,18 +332,62 @@ class TranscribingCard extends StatelessWidget {
 
   final String id;
 
+  /// Waiting for the STT model: saved, and transcribed by itself once the model is here.
+  Widget _waiting(BuildContext context, Services s) {
+    final theme = Theme.of(context);
+    final accent = Accent.of(context);
+    final status = s.ant.status.value;
+    final stt = modelGroup('STT model');
+    final coming = stt.coming(s.ant.downloading.value, s.downloads.wanted);
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(color: theme.colorScheme.surfaceContainer, borderRadius: BorderRadius.circular(16)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          Icon(Icons.pending_outlined, size: 22, color: accent),
+          const SizedBox(width: 12),
+          Expanded(child: Text('Transcript waiting', style: theme.textTheme.titleSmall)),
+        ]),
+        const SizedBox(height: 8),
+        Text(
+          'Your recording is saved. To write it down, Docket needs the STT model. Once it is on the phone, this note '
+          'and any others waiting are transcribed by themselves.',
+          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.4),
+        ),
+        const SizedBox(height: 12),
+        if (coming) ...[
+          Text('Downloading the STT model', style: theme.textTheme.labelMedium),
+          const SizedBox(height: 6),
+          LinearProgressIndicator(value: stt.progress(status, s.ant.downloading.value), minHeight: 4, color: accent),
+          const DownloadNotice(padding: EdgeInsets.only(top: 10)),
+        ] else
+          FilledButton(
+            onPressed: () => getModels(context, stt.offered(status)),
+            child: Text('Download STT model · ${sizeLabel(stt.missing(status))}'),
+          ),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final accent = Accent.of(context);
-    final recordings = ServicesScope.of(context).recordings;
+    final s = ServicesScope.of(context);
+    final recordings = s.recordings;
     return ListenableBuilder(
-      listenable: recordings,
+      listenable: Listenable.merge([recordings, s.ant.status, s.ant.downloading, s.downloads]),
       builder: (context, _) {
         final failure = recordings.failure(id);
         final stage = recordings.stage(id);
         final fraction = recordings.fraction(id);
         final busy = failure == null && stage != null;
+        final status = s.ant.status.value;
+        // Not transcribed for want of the STT model: it waits for it, and says how to get it.
+        if (failure != null && !status.phonon && status.downloads.isNotEmpty) {
+          return _waiting(context, s);
+        }
         return Container(
           margin: const EdgeInsets.symmetric(vertical: 8),
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),

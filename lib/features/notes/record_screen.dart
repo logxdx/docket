@@ -19,6 +19,7 @@ import '../../app/services.dart';
 import '../../app/theme.dart';
 import '../../core/voice/recording.dart';
 import '../../core/voice/spoken.dart' show joinWords;
+import '../onboarding/tips.dart';
 import 'listening_glow.dart';
 import 'note_screen.dart';
 
@@ -80,6 +81,17 @@ class _RecordScreenState extends State<RecordScreen> {
   }
 
   Future<void> _start() async {
+    // The first time, why the microphone, before Android asks; Not now leaves.
+    if (_services.tipDue('mic') && !await _ant.microphoneGranted()) {
+      if (!mounted) return;
+      final go = await showMicPrimer(context);
+      _services.tipSeen('mic');
+      if (!go) {
+        if (mounted) Navigator.pop(context);
+        return;
+      }
+    }
+    if (!mounted) return;
     if (!await _ant.microphone()) {
       setState(() => _problem = 'Recording needs the microphone: allow it in the phone\'s settings for Docket.');
       return;

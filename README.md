@@ -75,9 +75,13 @@ Every model runs on the phone. `python3 -I tool/fetch_models.py` fetches each
 one's Android files, pinned to the revision its SDK release (4.3.0) declares
 and checked against the Hub's SHA-256, into `.models/` (gitignored), and
 `tool/stage_models.py` lists them all as downloads: the APK carries no
-model (about 100 MB, nearly all native code). The first time the app is
-opened it offers three things to download, as Settings › On-device models
-does later (and a card on the notes list until something is there):
+model (about 100 MB, nearly all native code). A fresh install opens on the
+intro (`lib/features/onboarding/`): what Docket is, where the notes live,
+three things to download (all preselected), an AI server if wanted, then the
+downloads coming down while the app is already usable. An update skips it;
+Settings › Help replays it, opens What Docket can do, and turns the one-time
+tips back on. Settings › On-device models has the same three downloads
+later (and a card on the notes list until something is there):
 - **STT model** (about 420 MB): Phonon-2.5 and Phonon-2.5 English, Ear,
   Clear, Who and Align: recordings to text, and Clean up.
 - **TTS model** (about 70 MB): the Phonon voice, for reading aloud.
@@ -86,7 +90,12 @@ does later (and a card on the notes list until something is there):
 
 Each model comes from Hugging Face at its pinned revision and is kept only
 when its sizes and sha256 match (`OfflineModels.kt`); a stopped download
-goes on where it left off. Phonon's recognizers come as their pinned
+goes on where it left off. Downloads run one after another in the
+background (`lib/app/downloads.dart`): over Wi-Fi only unless mobile data is
+allowed (asked first, with Don't ask again; Settings › On-device models),
+pausing when Wi-Fi drops and resuming when the connection is back. A
+recording made before the STT model is here waits for it, and is
+transcribed by itself once it is. Phonon's recognizers come as their pinned
 `.tar.zst` archives, unpacked as they stream in (zstd-jni), and
 EmbeddingGemma 2's container is cut into its graphs and weights as it
 streams. Without a model, what needs it waits (the phone's own recognizer

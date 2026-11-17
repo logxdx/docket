@@ -3,6 +3,8 @@ package app.notesapp.notes_app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -30,6 +32,17 @@ class MainActivity : FlutterActivity() {
                         askingMic = result
                         requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), MIC)
                     }
+                }
+                // Whether the microphone is allowed already, without asking (the primer comes before the asking).
+                "micGranted" -> result.success(
+                    checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
+                )
+                // The connection: online at all, and metered (mobile data) or not; downloads wait for Wi-Fi.
+                "network" -> {
+                    val cm = getSystemService(ConnectivityManager::class.java)
+                    val caps = cm?.getNetworkCapabilities(cm.activeNetwork)
+                    val online = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                    result.success(mapOf("online" to online, "metered" to (online && cm?.isActiveNetworkMetered == true)))
                 }
                 // A file the user picks (a picture or a sound for a note, a voice of their own): copied into the
                 // cache; its path and name, or null. A file over maxBytes (when given) is refused, not cut short.
