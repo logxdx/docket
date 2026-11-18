@@ -63,3 +63,6 @@ integration_test/speech_fixture.dart
 third_party/desert-ant-core/
 third_party/title-engine/
 .pre-desert-ant-backup.tar.gz
+
+# The toolchain (tool/env.sh): a folder, or a link to one
+/.tooling
