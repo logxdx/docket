@@ -26,6 +26,7 @@
 - **Private by design.** Every model runs on the phone. Nothing you record or write is sent anywhere.
 - **Optional AI.** Summarise and Tidy up with an AI server you choose (llama-server, Ollama or a cloud provider),
   only when you ask.
+- **Up to date.** Once a week Docket looks for a new version, downloads it on Wi-Fi, and installs it when you say.
 
 <p>
   <img src="docs/screenshots/welcome.png" width="19%" alt="The intro">

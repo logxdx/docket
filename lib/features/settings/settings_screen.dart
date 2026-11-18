@@ -141,8 +141,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Text(
                   _s.modelUrl.isNotEmpty
                       ? 'Summaries and Tidy up go to your model server. Everything else runs on this phone.'
-                      : 'Everything runs on this phone. Nothing is sent anywhere; models come from Hugging Face once, '
-                          'when you download them.',
+                      : 'Everything runs on this phone. Nothing you record or write is sent anywhere; models come from '
+                          'Hugging Face once, and updates from GitHub.',
                   style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.45)),
             ),
           ]),

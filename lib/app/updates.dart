@@ -15,7 +15,11 @@ import 'version.dart';
 
 /// Where Docket's releases are published.
 const releasesPage = 'https://github.com/logxdx/docket/releases';
-const _latestRelease = 'https://api.github.com/repos/logxdx/docket/releases/latest';
+/// GitHub's answer for the latest release (a build may point elsewhere, for trying an update on a test copy).
+const _latestRelease = String.fromEnvironment(
+  'DOCKET_LATEST_RELEASE',
+  defaultValue: 'https://api.github.com/repos/logxdx/docket/releases/latest',
+);
 
 /// A release: its version, what is new in it, and its APK (with the checksums file it is checked against).
 typedef Release = ({String version, String whatsNew, String apkUrl, String apkName, int apkSize, String sumsUrl, String page});
