@@ -13,6 +13,8 @@ import 'package:flutter/services.dart' show PlatformException;
 import '../../app/desert_ant.dart' show ModelStatus;
 import '../../app/services.dart';
 import '../../app/theme.dart';
+import '../../app/updates.dart';
+import '../../app/version.dart';
 import '../../core/ai/model.dart';
 import '../../core/ai/prompts.dart';
 import '../../core/notes/read_aloud.dart' show readingVoiceRegions;
@@ -21,6 +23,7 @@ import '../notes/note_screen.dart';
 import '../notes/notebooks_sheet.dart';
 import '../notes/record_screen.dart';
 import '../notes/search_screen.dart';
+import '../notes/update_card.dart';
 import '../onboarding/onboarding_screen.dart';
 import 'models_screen.dart';
 
@@ -28,8 +31,6 @@ part 'ai_screen.dart';
 part 'speech_screen.dart';
 part 'what_docket_can_do.dart';
 
-/// The app's version, as pubspec.yaml has it.
-const appVersion = '0.4.0';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -132,7 +133,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   if (mounted) setState(() {});
                 },
               ),
-              _Row('About & credits',
+              _Row('About & updates',
                   onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const _AboutScreen()))),
             ]),
             Padding(
@@ -324,7 +325,7 @@ class _Row extends StatelessWidget {
 
 /// A row that turns something on or off; the whole row toggles.
 class _Switch extends StatelessWidget {
-  const _Switch(this.label, this.value, this.onChanged, {this.note, this.onNote});
+  const _Switch(this.label, this.value, this.onChanged, {this.note, this.onNote, this.detail});
 
   final String label;
   final bool value;
@@ -333,6 +334,9 @@ class _Switch extends StatelessWidget {
   /// A line under the label, in the accent (what the setting needs and has not got); [onNote] when it is tapped.
   final String? note;
   final VoidCallback? onNote;
+
+  /// What the setting does, under its label.
+  final String? detail;
 
   @override
   Widget build(BuildContext context) {
@@ -348,6 +352,12 @@ class _Switch extends StatelessWidget {
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
                   Text(label, style: theme.textTheme.bodyLarge),
+                  if (detail != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3, bottom: 10, right: 8),
+                      child: Text(detail!,
+                          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.35)),
+                    ),
                   if (note != null)
                     GestureDetector(
                       onTap: onNote,
@@ -742,9 +752,128 @@ class _VoiceSheetState extends State<_VoiceSheet> {
 }
 
 /// The model server for Summarise, Tidy up and recording summaries: optional, used only when asked.
-/// Docket, its version, and the credits the on-device models' licences ask for.
+/// Board 22: Docket and its version, its updates (checked weekly, downloaded on Wi-Fi, both on unless turned off),
+/// and the credits.
 class _AboutScreen extends StatelessWidget {
   const _AboutScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final s = ServicesScope.of(context);
+    final updates = s.updates;
+    return Scaffold(
+      appBar: AppBar(title: const Text('About & updates')),
+      body: ListenableBuilder(
+        listenable: updates,
+        builder: (context, _) => ListView(padding: const EdgeInsets.only(bottom: 24), children: [
+          const SizedBox(height: 18),
+          Center(
+            child: Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+              alignment: Alignment.center,
+              child: const Icon(Icons.edit_outlined, size: 38, color: Colors.black, semanticLabel: 'Docket icon'),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Center(child: Text('Docket', style: theme.textTheme.titleLarge)),
+          const SizedBox(height: 4),
+          Center(child: Text('Version $appVersion', style: theme.textTheme.bodySmall?.copyWith(color: muted))),
+          _Group('Updates', [
+            _Switch('Check for updates', updates.checking, (on) => updates.checking = on,
+                detail: 'Once a week, from Docket\'s releases on GitHub. Only the latest version number is asked for; '
+                    'nothing about you or your notes is sent.'),
+            _Switch('Download on Wi-Fi', updates.downloadOnWifi, (on) => updates.downloadOnWifi = on,
+                detail: 'A new version comes down by itself and waits for you to install it.'),
+            _UpdateStatus(updates: updates),
+            _Row('What\'s new', onTap: () => s.ant.openLink(updates.release?.page ?? releasesPage)),
+          ]),
+          _Group('About', [
+            _Row('Credits',
+                onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const _CreditsScreen()))),
+          ]),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Where updates are: up to date (and when that was checked), a newer version and what to do with it, or what went
+/// wrong; and Check now (or Download, or Install).
+class _UpdateStatus extends StatelessWidget {
+  const _UpdateStatus({required this.updates});
+
+  final Updates updates;
+
+  static String _when(DateTime at) {
+    final now = DateTime.now();
+    final days = DateTime(now.year, now.month, now.day).difference(DateTime(at.year, at.month, at.day)).inDays;
+    final time = '${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}';
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return switch (days) {
+      0 => 'today, $time',
+      1 => 'yesterday, $time',
+      _ => '${at.day} ${months[at.month - 1]}${at.year == now.year ? '' : ' ${at.year}'}',
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final r = updates.release;
+    final checked = updates.lastChecked;
+    final (title, line) = switch (updates.state) {
+      UpdateState.checking => ('Checking…', null),
+      UpdateState.available => ('Docket ${r!.version} is here', r.apkSize > 0 ? sizeLabel(r.apkSize) : null),
+      UpdateState.downloading => (
+          'Downloading Docket ${r!.version}',
+          updates.progress == null ? null : '${(updates.progress! * 100).round()}%'
+        ),
+      UpdateState.ready => ('Docket ${r!.version} is ready', 'Downloaded and checked'),
+      UpdateState.failed => ('Couldn\'t check for updates', updates.problem),
+      UpdateState.idle => checked == null ? ('Not checked yet', null) : ('You\'re up to date', 'Checked ${_when(checked)}'),
+    };
+    final (String? action, VoidCallback? onAction) = switch (updates.state) {
+      UpdateState.checking || UpdateState.downloading => (null, null),
+      UpdateState.available => ('Download', () => downloadUpdate(context)),
+      UpdateState.ready => ('Install', () => installUpdate(context)),
+      _ => ('Check now', updates.check),
+    };
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 64),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 10, 10),
+        child: Row(children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+              Text(title, style: theme.textTheme.bodyLarge),
+              if (line != null) ...[
+                const SizedBox(height: 3),
+                Text(line, style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.35)),
+              ],
+              if (updates.state == UpdateState.downloading) ...[
+                const SizedBox(height: 8),
+                LinearProgressIndicator(value: updates.progress, minHeight: 3),
+              ],
+            ]),
+          ),
+          if (action != null) ...[
+            const SizedBox(width: 12),
+            FilledButton.tonal(onPressed: onAction, child: Text(action)),
+          ],
+        ]),
+      ),
+    );
+  }
+}
+
+/// The credits the on-device models' licences ask for.
+class _CreditsScreen extends StatelessWidget {
+  const _CreditsScreen();
 
   @override
   Widget build(BuildContext context) {
@@ -771,25 +900,8 @@ class _AboutScreen extends StatelessWidget {
           ),
         );
     return Scaffold(
-      appBar: AppBar(title: const Text('About & credits')),
+      appBar: AppBar(title: const Text('Credits')),
       body: ListView(children: [
-        const SizedBox(height: 18),
-        Center(
-          child: Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
-            alignment: Alignment.center,
-            child: const Icon(Icons.edit_outlined, size: 38, color: Colors.black, semanticLabel: 'Docket icon'),
-          ),
-        ),
-        const SizedBox(height: 10),
-        Center(child: Text('Docket', style: theme.textTheme.titleLarge)),
-        const SizedBox(height: 4),
-        Center(
-          child: Text('Version $appVersion · notes and voice, on this phone',
-              style: theme.textTheme.bodySmall?.copyWith(color: muted)),
-        ),
         _Group('On-device AI', [
           credit('Desert Ant Labs', 'Clear, Ear, Who, Align, Title, Gist', 'https://desertant.com'),
           credit('Fermion Research · Phonon-2.5', 'CC BY 4.0, from NVIDIA Parakeet-TDT',

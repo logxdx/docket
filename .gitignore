@@ -66,3 +66,4 @@ third_party/title-engine/
 
 # The toolchain (tool/env.sh): a folder, or a link to one
 /.tooling
+/.signing.env

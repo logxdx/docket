@@ -7,8 +7,9 @@
 #
 # A release holds: the arm64 APK (no models: the app downloads them, offered the first time it is opened and in
 # Settings › On-device models) and its SHA-256 sum.
-# Signing: DOCKET_KEYSTORE, DOCKET_KEYSTORE_PASSWORD, DOCKET_KEY_ALIAS, DOCKET_KEY_PASSWORD when set
-# (android/app/build.gradle.kts), else this machine's debug key.
+# Signing: tool/sign_apk.sh, with Docket's release key (kept outside the repository), so the app's own updates install
+# over it. A published release must be signed with it; a local build without the key keeps the debug key.
+# What's new: docs/whats-new/vX.Y.Z.md, one short paragraph, first in the release notes (the app shows it).
 set -euo pipefail
 version="${1:?usage: tool/release.sh vX.Y.Z [--publish]}"
 publish="${2:-}"
@@ -42,6 +43,16 @@ grep -qx 'assets/models/manifest.json' <<<"$listing" || { echo "the APK has no m
 size=$(stat -c %s "$apk")
 [ "$size" -lt $((2 * 1024 * 1024 * 1024)) ] || { echo "the APK is over GitHub's 2 GiB limit ($size bytes)" >&2; exit 1; }
 
+if [ -n "${DOCKET_LINEAGE:-}" ] || [ -f "${DOCKET_SIGNING_ENV:-.signing.env}" ]; then
+  printf '\n== signing\n'
+  tool/sign_apk.sh "$apk"
+elif [ "$publish" = "--publish" ]; then
+  echo "a published release must be signed with Docket's release key (tool/sign_apk.sh)" >&2
+  exit 1
+else
+  echo "not signed with the release key (tool/sign_apk.sh): this APK will not install over a released Docket" >&2
+fi
+
 rm -rf "$out" && mkdir -p "$out"
 cp "$apk" "$out/docket-$version-arm64.apk"
 
@@ -51,10 +62,12 @@ ls -la "$out"
 if [ "$publish" = "--publish" ]; then
   printf '\n== GitHub release %s\n' "$version"
   notes="$out/NOTES.md"
+  whats_new=""
+  if [ -f "docs/whats-new/$version.md" ]; then whats_new="$(cat "docs/whats-new/$version.md")"$'\n\n'; fi
   cat > "$notes" <<NOTES
 Docket $version for Android (arm64).
 
-- **docket-$version-arm64.apk**: the app. Its models are downloaded in the app from Hugging Face the
+${whats_new}- **docket-$version-arm64.apk**: the app. Its models are downloaded in the app from Hugging Face the
   first time it is opened (speech to text, reading aloud, and the notes models for titles, tags and search),
   every file checked, or Android's own speech is used instead; everything runs on the phone.
 - **SHA256SUMS**: its checksum.

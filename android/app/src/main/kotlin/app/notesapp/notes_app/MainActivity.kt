@@ -16,6 +16,7 @@ class MainActivity : FlutterActivity() {
     private var askingMic: MethodChannel.Result? = null
     private var pickingFile: MethodChannel.Result? = null
     private var pickLimit: Long? = null
+    private var updates: UpdateInstaller? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -23,6 +24,8 @@ class MainActivity : FlutterActivity() {
         AudioPlayer(applicationContext, flutterEngine)
         // Recording, and Desert Ant's on-device models (lib/app/desert_ant.dart).
         DesertAntBridge(applicationContext, flutterEngine)
+        // Installing Docket's own updates (lib/app/updates.dart).
+        val updater = UpdateInstaller(this).also { updates = it }
         // The microphone permission, asked when recording starts; and opening a link.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "notes/permissions").setMethodCallHandler { call, result ->
             when (call.method) {
@@ -35,6 +38,11 @@ class MainActivity : FlutterActivity() {
                         requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), MIC)
                     }
                 }
+                // Updates: may Docket install apps; Android's setting for it; install one; a download's sha256.
+                "canInstall" -> result.success(updater.canInstall())
+                "allowInstalls" -> result.success(updater.allowInstalls().let { true })
+                "install" -> updater.install(call.argument<String>("path")!!, result)
+                "sha256" -> updater.sha256(call.argument<String>("path")!!, result)
                 // The Android version: its speech to text reads a recording from a file from Android 13 (33).
                 "sdk" -> result.success(Build.VERSION.SDK_INT)
                 // Whether the microphone is allowed already, without asking (the primer comes before the asking).
@@ -152,6 +160,12 @@ class MainActivity : FlutterActivity() {
                 runOnUiThread { result.error("pick", e.message ?: "The file could not be read", null) }
             }
         }.start()
+    }
+
+    override fun onDestroy() {
+        updates?.close()
+        updates = null
+        super.onDestroy()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {

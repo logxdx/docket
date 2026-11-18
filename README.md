@@ -63,8 +63,9 @@ tool/release.sh v0.4.0 [--publish]  # release APK and SHA256SUMS; --publish tags
 ```
 
 Desert Ant's models are built from source with Docket's patches (`third_party/desert-ant-core-patches/`, run by
-`tool/build_desert_ant.sh`). Release signing uses `DOCKET_KEYSTORE`, `DOCKET_KEYSTORE_PASSWORD`, `DOCKET_KEY_ALIAS` and
-`DOCKET_KEY_PASSWORD` when set, else the debug key. The GitHub workflows run the same scripts (they are disabled
+`tool/build_desert_ant.sh`). Releases are signed by `tool/sign_apk.sh` with Docket's
+release key, kept outside the repository, so the app's own updates install over it; without the key a local build
+keeps the debug key. The GitHub workflows run the same scripts (they are disabled
 while Actions minutes are out).
 
 ## Credits

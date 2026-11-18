@@ -31,6 +31,7 @@ import 'record_screen.dart';
 import 'search_screen.dart';
 import 'archive_screen.dart';
 import 'trash_screen.dart';
+import 'update_card.dart';
 
 class NotesScreen extends StatefulWidget {
   const NotesScreen({super.key});
@@ -540,6 +541,7 @@ class _NotesScreenState extends State<NotesScreen> {
                         ]),
                       ),
               ),
+              UpdateCard(updates: _s.updates),
               _ModelsNudge(services: _s),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),

@@ -303,6 +303,32 @@ class DesertAnt {
     }
   }
 
+  /// Whether Android lets Docket install its updates (asked once, in Android's settings).
+  Future<bool> canInstall() async {
+    try {
+      return await _permissions.invokeMethod<bool>('canInstall') ?? false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  /// Android's setting for it ("Allow from this source"); the answer is seen when Docket comes back.
+  Future<void> allowInstalls() async {
+    try {
+      await _permissions.invokeMethod<bool>('allowInstalls');
+    } on MissingPluginException {
+      // Not on Android.
+    }
+  }
+
+  /// Hand the APK at [path] to Android's installer, which asks the user; completes when it is installed (Docket
+  /// restarts as the new version), throws [PlatformException] when it was not.
+  Future<void> install(String path) => _permissions.invokeMethod<bool>('install', {'path': path});
+
+  /// A file's sha256, lowercase hex.
+  Future<String> sha256(String path) async =>
+      (await _permissions.invokeMethod<String>('sha256', {'path': path}))!;
+
   /// Open [url] in the browser (only when the user taps a link).
   Future<bool> openLink(String url) async {
     try {

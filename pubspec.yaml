@@ -1,7 +1,7 @@
 name: notes_app
 description: "Notes: plain Markdown files with Obsidian's conventions, voice notes cleaned, transcribed, titled and tagged on the phone by Desert Ant's models, fully offline."
 publish_to: 'none'
-version: 0.4.0+1
+version: 0.5.0+1
 
 environment:
   sdk: ^3.13.5
@@ -22,6 +22,7 @@ dev_dependencies:
   integration_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  crypto: ^3.0.7
 
 flutter:
   uses-material-design: true

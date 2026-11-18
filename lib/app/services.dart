@@ -3,6 +3,7 @@
 /// how the app looks.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -25,6 +26,7 @@ import 'recordings.dart';
 import 'saf_vault.dart';
 import 'settings.dart';
 import 'theme.dart';
+import 'updates.dart';
 
 /// A notebook: a folder of notes to switch to ([uri] '' for the home one), what it is called, and whether Docket
 /// leaves its files as they are.
@@ -337,6 +339,15 @@ class Services {
     write: settings.set,
   );
 
+  /// Docket's own updates: checked weekly, downloaded on Wi-Fi, installed when the user says (lib/app/updates.dart).
+  late final updates = Updates(
+    folder: Directory('${support.path}/updates'),
+    read: settings.get,
+    write: settings.set,
+    network: ant.network,
+    sha256: ant.sha256,
+  );
+
   /// Put the models in place and pick up recordings an earlier run left.
   Future<void> startModels() async {
     await ant.prepare();
@@ -354,6 +365,8 @@ class Services {
     });
     // Downloads wanted when the app last closed carry on.
     downloads.resume();
+    // An update waiting, or the weekly check.
+    unawaited(updates.start());
   }
 
   /// The intro: shown on a fresh install, and from Settings › Help. An update (settings already there) skips it.

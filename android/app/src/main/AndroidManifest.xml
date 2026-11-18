@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- Model downloads: whether the connection is Wi-Fi or mobile data (Wi-Fi only unless the user says). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <!-- Docket's own updates (Settings › About & updates): handed to Android's installer, which asks the user. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <!-- RecordingService: recording on with the screen locked, and transcribing at full speed with the app left. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
