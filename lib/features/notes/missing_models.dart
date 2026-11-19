@@ -143,7 +143,8 @@ class _TitlesCardState extends State<TitlesCard> {
   bool _due(Services s) {
     final status = s.ant.status.value;
     if (s.settings.get('card.titles') == 'off' || s.notebook.readOnly) return false;
-    if (_notes.offered(status).isEmpty || _notes.ready(status)) return false;
+    // A note's title and topics need Title and Gist, not the rest of the group (Eye, for pictures).
+    if (_notes.offered(status).isEmpty || hasModels(status, [...titleModels, ...topicModels])) return false;
     if (Notebook.isBlank(widget.note.text)) return false;
     return (s.autoEnabled('title') && isPlaceholderTitle(widget.note.title)) ||
         (s.autoEnabled('tags') && widget.note.tags.isEmpty);

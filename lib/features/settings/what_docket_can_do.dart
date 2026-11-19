@@ -20,6 +20,8 @@ class _WhatDocketCanDo extends StatelessWidget {
           final status = s.ant.status.value;
           bool has(String group) {
             final g = modelGroup(group);
+            // Search by meaning, the one feature needing the notes models here, needs EmbeddingGemma 2 of them.
+            if (group == 'Notes models') return g.offered(status).isEmpty || hasModels(status, meaningModels);
             return g.offered(status).isEmpty || g.ready(status);
           }
 

@@ -50,6 +50,13 @@ const modelGroups = [
   ModelGroup('Notes models', 'Titles, tags and search by meaning', ['title', 'gist', 'embeddinggemma', 'mirage', 'eye']),
 ];
 
+/// The notes models each feature runs on: it works once its own are on the phone, whatever else of the group is still
+/// to come (a phone that had the notes models before Eye joined them still titles, tags and searches).
+const titleModels = ['title'], topicModels = ['gist'], pictureModels = ['eye'], meaningModels = ['embeddinggemma'];
+
+/// Whether the phone has each of [ids] this build offers.
+bool hasModels(ModelStatus s, List<String> ids) => ids.where(s.downloads.containsKey).every(s.has);
+
 /// The group [name] is ('STT model', 'TTS model', 'Notes models').
 ModelGroup modelGroup(String name) => modelGroups.firstWhere((g) => g.name == name);
 

@@ -404,7 +404,7 @@ class _SearchScreenState extends State<SearchScreen> {
     final accent = Accent.of(context);
     final status = _s.ant.status.value;
     final notes = modelGroup('Notes models');
-    final ready = notes.ready(status);
+    final ready = notes.offered(status).isEmpty || hasModels(status, meaningModels);
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
       child: Container(

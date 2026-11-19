@@ -42,13 +42,14 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late final Services _s = ServicesScope.of(context);
 
-  /// What the title and tag switches need and have not got (null: nothing missing).
-  String? _notesNote(ModelStatus status) {
+  /// What a switch needs of the notes models ([models], and for tags [more]: pictures) and has not got (null:
+  /// nothing missing).
+  String? _notesNote(ModelStatus status, List<String> models, {List<String> more = const []}) {
     final notes = modelGroup('Notes models');
-    if (notes.offered(status).isEmpty || notes.ready(status)) return null;
-    return notes.coming(_s.ant.downloading.value, _s.downloads.wanted)
-        ? 'Downloading the notes models…'
-        : 'Needs the notes models · Download';
+    final needed = !hasModels(status, models), wanted = !hasModels(status, more);
+    if (!needed && !wanted) return null;
+    if (notes.coming(_s.ant.downloading.value, _s.downloads.wanted)) return 'Downloading the notes models…';
+    return needed ? 'Needs the notes models · Download' : 'Pictures need one more model · Download';
   }
 
   void _getNotesModels() => getModels(context, modelGroup('Notes models').offered(_s.ant.status.value));
@@ -92,9 +93,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               // A switch stays as set; without the notes models, the line under it says so and gets them.
               _Switch('Title new notes', _s.autoEnabled('title'), (on) => setState(() => _s.setAutoEnabled('title', on)),
-                  note: _notesNote(status), onNote: _getNotesModels),
-              _Switch('Tag notes and pictures',_s.autoEnabled('tags'), (on) => setState(() => _s.setAutoEnabled('tags', on)),
-                  note: _notesNote(status), onNote: _getNotesModels),
+                  note: _notesNote(status, titleModels), onNote: _getNotesModels),
+              _Switch('Tag notes and pictures', _s.autoEnabled('tags'), (on) => setState(() => _s.setAutoEnabled('tags', on)),
+                  note: _notesNote(status, topicModels, more: pictureModels), onNote: _getNotesModels),
             ]),
             _Group('Notes', [
               _Row('Notebooks',
