@@ -4,6 +4,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:notes_app/core/search/meaning.dart';
 
 void main() {
+  test("Eye's look: its kind and what it saw as words, kept and read back; a kind as a tag", () {
+    const look = PictureLook(kind: 'id_card', tags: ['group_shot', 'smiling'], rotation: 90);
+    expect(look.words, 'id card group shot smiling');
+    final back = PictureLook.fromJson(look.toJson());
+    expect(back.kind, 'id_card');
+    expect(back.tags, ['group_shot', 'smiling']);
+    expect(back.rotation, 90);
+    expect(PictureLook.fromJson(const PictureLook().toJson()).kind, isNull);
+    expect(pictureKindTag('chart_or_slide'), 'chart-or-slide');
+  });
+
   test('prose leaves out front matter, embeds and comments; transcripts become moments that know where they start', () {
     const note = '---\ntags: [x]\n---\n# Trip\n\nBook the train to Porto.\n\n![[ticket.png]]\n<!-- hidden -->\n\n'
         '![[Recording 2026-11-16 1000.m4a]]\n\n## Transcript\n\nFirst we talk about trains.\nThen about hotels in Porto.\n';

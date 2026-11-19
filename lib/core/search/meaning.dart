@@ -44,6 +44,30 @@ class PictureTags {
       );
 }
 
+/// What Eye made of a picture: its [kind] when it is more than a photo (`receipt`, `screenshot`, `whiteboard`, ...),
+/// what else it sees ([tags]: the things in it, its people, how it was taken) and how far it is turned clockwise
+/// ([rotation], when Eye is sure). The kind becomes a tag on the note; the rest are hidden search terms.
+class PictureLook {
+  const PictureLook({this.kind, this.tags = const [], this.rotation});
+  final String? kind;
+  final List<String> tags;
+  final int? rotation;
+
+  /// Everything, as words to match: `group_shot` as "group shot".
+  String get words => [?kind, ...tags].map((t) => t.replaceAll('_', ' ')).join(' ');
+
+  Map<String, Object> toJson() => {'kind': ?kind, 'tags': tags, 'rotation': ?rotation};
+
+  static PictureLook fromJson(Map<String, Object?> j) => PictureLook(
+        kind: j['kind'] as String?,
+        tags: [...((j['tags'] as List?) ?? const []).cast<String>()],
+        rotation: (j['rotation'] as num?)?.toInt(),
+      );
+}
+
+/// A picture's kind as a note's tag: `id_card` -> "id-card".
+String pictureKindTag(String kind) => kind.replaceAll('_', '-');
+
 /// EmbeddingGemma 2's prompt for a search (its model card's retrieval query).
 String queryPrompt(String query) => 'task: search result | query: ${query.trim()}';
 

@@ -147,7 +147,7 @@ class DesertAnt {
 
   // Reading aloud (Phonon TTS, English)
 
-  // Search: picture tags (Mirage) and vectors (EmbeddingGemma 2)
+  // Search: pictures' kinds and contents (Eye), picture tags (Mirage) and vectors (EmbeddingGemma 2)
 
   /// Mirage's tags for the picture in [bytes]: the things in it, the text it read and a one-line description; null
   /// when Mirage is not on the phone. Throws (PlatformException) when the picture cannot be read.
@@ -158,6 +158,18 @@ class DesertAnt {
       objects: [...((m['objects'] as List?) ?? const []).cast<String>()],
       text: [...((m['text'] as List?) ?? const []).cast<String>()],
       summary: m['summary'] as String? ?? '',
+    );
+  }
+
+  /// Eye's look at the picture in [bytes]: its kind, what is in it and how it is turned; null when Eye is not on the
+  /// phone. Throws (PlatformException) when the picture cannot be read.
+  Future<PictureLook?> lookAtPicture(Uint8List bytes) async {
+    final m = await _call<Map>('pictures.look', {'bytes': bytes});
+    if (m == null) return null;
+    return PictureLook(
+      kind: m['kind'] as String?,
+      tags: [...((m['tags'] as List?) ?? const []).cast<String>()],
+      rotation: (m['rotation'] as num?)?.toInt(),
     );
   }
 

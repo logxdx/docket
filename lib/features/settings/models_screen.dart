@@ -47,7 +47,7 @@ const modelGroups = [
     'phonon-p25', 'phonon-en', 'ear', 'clear', 'who', 'align',
   ]),
   ModelGroup('TTS model', 'Reads notes aloud', ['phonon-tts']),
-  ModelGroup('Notes models', 'Titles, tags and search by meaning', ['title', 'gist', 'embeddinggemma', 'mirage']),
+  ModelGroup('Notes models', 'Titles, tags and search by meaning', ['title', 'gist', 'embeddinggemma', 'mirage', 'eye']),
 ];
 
 /// The group [name] is ('STT model', 'TTS model', 'Notes models').

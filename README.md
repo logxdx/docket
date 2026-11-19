@@ -17,9 +17,11 @@
 - **Clean up.** One tap on a transcript takes out noise and room echo, tells speakers apart and times every word,
   each step yours to leave out.
 - **Write.** Plain Markdown files with Obsidian's conventions: `[[links]]`, `#tags`, embeds, callouts, tasks,
-  properties, daily notes, backlinks and a graph. Pictures and audio files come in from **+**.
+  properties, daily notes, backlinks and a graph. Pictures and audio files come in from **+**; a picture of a
+  receipt, a whiteboard or a screenshot tags its note as one.
 - **Find.** Search words and meaning together: "free audiobooks" finds a recording about LibriVox, "present for a
-  friend" a note of birthday ideas, and a picture is found by what is in it.
+  friend" a note of birthday ideas, and a picture is found by what is in it, who is in it ("group shot") and how
+  it was taken ("blurry").
 - **Read aloud.** Any note, sentence by sentence, in a natural voice of your choice (or one of your own).
 - **Notebooks.** Notes live in Documents › Docket, or any folder on the phone; add other folders (such as an
   Obsidian vault) and switch between them, editable or read only.
@@ -45,7 +47,7 @@ checked, over Wi-Fi unless you allow mobile data:
 |---|---|---|
 | STT model | 421 MB | Transcripts, language detection, live words, Clean up |
 | TTS model | 71 MB | Reading aloud |
-| Notes models | 788 MB | Titles, tags, search by meaning, what is in pictures |
+| Notes models | 854 MB | Titles, tags, search by meaning, what is in pictures and what kind each is |
 
 Speech can use Android's own instead (Settings › Speech): its on-device speech to text (Android 13+) and its offline
 voices, with no download.
@@ -71,6 +73,6 @@ while Actions minutes are out).
 
 ## Credits
 
-On-device AI by [Desert Ant Labs](https://desertant.com) (Ear, Clear, Who, Align, Title, Gist); speech recognition by
+On-device AI by [Desert Ant Labs](https://desertant.com) (Ear, Clear, Who, Align, Title, Gist, Eye); speech recognition by
 Fermion Research's Phonon-2.5; the reading voice by Gradium's Phonon; search by Google's EmbeddingGemma 2; picture
 tags by Cactus Compute's Mirage.

@@ -1,6 +1,7 @@
 /// The index for search by meaning, kept up to date in the background: every note's passages (its text, and its
 /// recordings' transcripts as moments) as EmbeddingGemma 2 vectors, and every picture the notes show with Mirage's
-/// tags (hidden search terms) and EmbeddingGemma 2's vector of the picture itself. Kept in the app's own folder, one
+/// tags and Eye's look (its kind, the things and people in it: hidden search terms) and EmbeddingGemma 2's vector
+/// of the picture itself. Kept in the app's own folder, one
 /// file per vault, never in the vault. A model not on the phone is skipped, and what it would have added comes
 /// once it is downloaded. It steps aside while a recording is made or processed.
 library;
@@ -58,8 +59,9 @@ class _NoteEntry {
 }
 
 class _PictureEntry {
-  _PictureEntry({this.tags, this.vector});
+  _PictureEntry({this.tags, this.look, this.vector});
   PictureTags? tags;
+  PictureLook? look;
   Int8List? vector;
 }
 
@@ -90,11 +92,47 @@ class MeaningIndex extends ChangeNotifier {
 
   bool get _embeds => ant.status.value.has('embeddinggemma');
   bool get _tags => ant.status.value.has('mirage');
+  bool get _looks => ant.status.value.has('eye');
 
-  /// Mirage's tags of the picture [name] shown in [note], when it has been tagged.
+  /// What the picture [name] shown in [note] is known by, when it has been looked at: Mirage's tags, with Eye's
+  /// kind and what it saw among the things in it.
   PictureTags? tagsOf(Note note, String name) {
     final path = _notes[note.path]?.pictures[name];
-    return path == null || path.isEmpty ? null : _pictures[path]?.tags;
+    final p = path == null || path.isEmpty ? null : _pictures[path];
+    if (p == null || (p.tags == null && p.look == null)) return null;
+    final look = p.look?.words ?? '';
+    return PictureTags(
+      objects: [...?p.tags?.objects, if (look.isNotEmpty) look],
+      text: p.tags?.text ?? const [],
+      summary: p.tags?.summary ?? '',
+    );
+  }
+
+  /// Eye's look at each picture [note] shows (name as embedded -> its look), looked at now when it has not been:
+  /// for the note's tags as it is saved. Empty when Eye is not on the phone.
+  Future<Map<String, PictureLook>> looksIn(Note note) async {
+    if (!_looks) return const {};
+    await _load();
+    final out = <String, PictureLook>{};
+    for (final p in picturesIn(note.text)) {
+      if (p.name.startsWith('http')) continue;
+      final (path, bytes) = await _read(p.name, note.folder);
+      if (path.isEmpty || bytes == null) continue;
+      final entry = _pictures.putIfAbsent(path, _PictureEntry.new);
+      entry.look ??= await _lookAt(bytes);
+      if (entry.look != null) out[p.name] = entry.look!;
+    }
+    return out;
+  }
+
+  /// Eye's look at [bytes]; a picture it cannot read is an empty look (not asked again), never an error.
+  Future<PictureLook?> _lookAt(Uint8List bytes) async {
+    try {
+      return await ant.lookAtPicture(bytes);
+    } on Object catch (e) {
+      debugPrint('meaning index: Eye could not look at a picture: $e');
+      return const PictureLook();
+    }
   }
 
   /// Index again soon: after notes change, or a model arrives.
@@ -157,7 +195,7 @@ class MeaningIndex extends ChangeNotifier {
     for (final path in e.pictures.values) {
       if (path.isEmpty) continue;
       final p = _pictures[path];
-      if (p == null || (_tags && p.tags == null) || (_embeds && p.vector == null)) return true;
+      if (p == null || _needs(p)) return true;
     }
     return false;
   }
@@ -180,6 +218,7 @@ class MeaningIndex extends ChangeNotifier {
       if (path.isEmpty || bytes == null) continue;
       final entry = _pictures.putIfAbsent(path, _PictureEntry.new);
       if (_tags && entry.tags == null) entry.tags = await ant.tagPicture(bytes);
+      if (_looks && entry.look == null) entry.look = await _lookAt(bytes);
       if (_embeds && entry.vector == null) {
         final v = await ant.embedImage(bytes);
         if (v != null) entry.vector = quantize(v);
@@ -188,7 +227,8 @@ class MeaningIndex extends ChangeNotifier {
     _notes[n.path] = _NoteEntry(n.file.mtime, passages, pictures);
   }
 
-  bool _needs(_PictureEntry p) => (_tags && p.tags == null) || (_embeds && p.vector == null);
+  bool _needs(_PictureEntry p) =>
+      (_tags && p.tags == null) || (_looks && p.look == null) || (_embeds && p.vector == null);
 
   /// The picture [name] shown in a note in [folder]: its path in the vault and its bytes, or ('', null).
   Future<(String, Uint8List?)> _read(String name, String folder) async {
@@ -271,6 +311,7 @@ class MeaningIndex extends ChangeNotifier {
       for (final MapEntry(key: path, value: v) in ((j['pictures'] as Map?) ?? const {}).cast<String, Map>().entries) {
         _pictures[path] = _PictureEntry(
           tags: v['tags'] == null ? null : PictureTags.fromJson((v['tags'] as Map).cast<String, Object?>()),
+          look: v['look'] == null ? null : PictureLook.fromJson((v['look'] as Map).cast<String, Object?>()),
           vector: v['v'] == null ? null : decodeVector(v['v'] as String),
         );
       }
@@ -319,7 +360,11 @@ class MeaningIndex extends ChangeNotifier {
       },
       'pictures': {
         for (final MapEntry(key: path, value: p) in _pictures.entries)
-          path: {if (p.tags != null) 'tags': p.tags!.toJson(), if (p.vector != null) 'v': encodeVector(p.vector!)},
+          path: {
+            if (p.tags != null) 'tags': p.tags!.toJson(),
+            if (p.look != null) 'look': p.look!.toJson(),
+            if (p.vector != null) 'v': encodeVector(p.vector!),
+          },
       },
     };
     await file.parent.create(recursive: true);

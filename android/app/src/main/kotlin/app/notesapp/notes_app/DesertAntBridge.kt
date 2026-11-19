@@ -3,6 +3,7 @@ package app.notesapp.notes_app
 import ai.desertant.clear.Clear
 import ai.desertant.clear.Options as ClearOptions
 import ai.desertant.ear.Ear
+import ai.desertant.eye.Eye
 import ai.desertant.gist.Gist
 import ai.desertant.who.Who
 import android.content.Context
@@ -29,7 +30,8 @@ import java.util.concurrent.ConcurrentHashMap
  *    a step gives even when a later one fails: prepare (Clear cleans the audio, written as
  *    .m4a, and a 16 kHz copy is kept here), identify (Ear), transcribe with Phonon-2.5 or with
  *    the phone's own on-device recognizer, diarize (Who), refine word times (Align);
- *  - text: topics (Gist), a title (Title).
+ *  - text: topics (Gist), a title (Title);
+ *  - pictures: what kind each is and what is in it (Eye; Mirage, PictureEye.kt and MirageTagger.kt).
  *
  * Every model is built from the folder [OfflineModels] filled (from the APK, or downloaded when the
  * user asked), and only when that folder is complete; a missing model is a step the notes do without.
@@ -96,6 +98,7 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
     private fun ear() = model("ear") { Ear(context, it) }
     private fun who() = model("who") { Who(context, it) }
     private fun gist() = model("gist") { Gist(context, it) }
+    private fun eye() = model("eye") { Eye(context, it) }
 
     /** A Phonon-2.5 model kept like the SDK models (one heavy model at a time). */
     private class PhononHandle(val model: PhononAsr.Model) : AutoCloseable {
@@ -179,6 +182,18 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
         "pictures.tag" -> withContext(Dispatchers.Default) {
             val dir = offline.directory("mirage") ?: return@withContext null
             MirageTagger.tag(dir, call.argument<ByteArray>("bytes")!!)
+        }
+
+        // Eye's look at a picture (PictureEye: its kind, what is in it, a rotation), or null when Eye is not on the phone.
+        "pictures.look" -> withContext(Dispatchers.Default) {
+            val eye = eye() ?: return@withContext null
+            val bitmap = uprightPicture(call.argument<ByteArray>("bytes")!!, PictureEye.SIDE)
+                ?: throw IllegalArgumentException("not a picture Android can read")
+            try {
+                PictureEye.read(eye.analyze(bitmap))
+            } finally {
+                bitmap.recycle()
+            }
         }
 
         // EmbeddingGemma 2's vectors for search by meaning (texts carry their prompts; pictures as they are), or null

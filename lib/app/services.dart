@@ -322,7 +322,7 @@ class Services {
   );
 
   /// Emoji, tags and titles for typed notes as they are saved.
-  late final enricher = Enricher(notebook: notebook, ant: ant, enabled: autoEnabled);
+  late final enricher = Enricher(notebook: notebook, ant: ant, enabled: autoEnabled, looks: meaning.looksIn);
 
   /// Settings › On-device AI: 'title' or 'tags', on unless turned off.
   bool autoEnabled(String feature) => settings.get('auto.$feature') != 'off';

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Build Docket's Desert Ant libraries from source: Desert Ant's SDK at v4.3.0 with Docket's patches
 # (third_party/desert-ant-core-patches/), for arm64-v8a only, into android/app/libs/:
-#   <model>-release.aar                      the Kotlin API of Clear, Ear, Who, Gist, Align and Title (no natives)
-#   jni/arm64-v8a/libDesertAntAndroid.so     all six models' native code in one library
-# One library rather than six: each per-model library links its own static copy of the Swift runtime and
+#   <model>-release.aar                      the Kotlin API of Clear, Ear, Who, Gist, Align, Title and Eye (no natives)
+#   jni/arm64-v8a/libDesertAntAndroid.so     all seven models' native code in one library
+# One library rather than seven: each per-model library links its own static copy of the Swift runtime and
 # Foundation (~56 MB apiece). ai.desertant:core (LiteRT) still comes from Maven.
 # Nothing built is kept in git; the same here and in CI (tool/ci.sh, tool/release.sh).
 #
@@ -26,10 +26,10 @@ fi
 repo=https://github.com/Desert-Ant-Labs/desert-ant-core
 pin=baf4e6e3b4655c8e54aa8d5a25215b5f35f899a7 # v4.3.0
 abi=arm64-v8a
-models=(clear ear who gist align title)
+models=(clear ear who gist align title eye)
 shared=DesertAntAndroid
-patches=("$root"/third_party/desert-ant-core-patches/000[1-3]-*.patch)
-[ "${#patches[@]}" -eq 3 ] && [ -f "${patches[0]}" ] || { echo "Docket's Desert Ant patches are missing" >&2; exit 1; }
+patches=("$root"/third_party/desert-ant-core-patches/000[1-4]-*.patch)
+[ "${#patches[@]}" -eq 4 ] && [ -f "${patches[0]}" ] || { echo "Docket's Desert Ant patches are missing" >&2; exit 1; }
 libs=android/app/libs
 so="$libs/jni/$abi/lib$shared.so"
 src=.build/desert-ant-core
@@ -72,5 +72,5 @@ for model in "${models[@]}"; do
   cp "$aar" "$libs/$model-release.aar"
 done
 cp "$src/.build-android/shared/jniLibs/$abi/lib$shared.so" "$so"
-printf '%s: %s MB, and the six model AARs\n' "$so" "$(($(stat -c %s "$so") / 1000000))"
+printf '%s: %s MB, and the seven model AARs\n' "$so" "$(($(stat -c %s "$so") / 1000000))"
 echo "$key" >"$libs/desert-ant.key"

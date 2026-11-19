@@ -93,7 +93,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               // A switch stays as set; without the notes models, the line under it says so and gets them.
               _Switch('Title new notes', _s.autoEnabled('title'), (on) => setState(() => _s.setAutoEnabled('title', on)),
                   note: _notesNote(status), onNote: _getNotesModels),
-              _Switch('Tag topics', _s.autoEnabled('tags'), (on) => setState(() => _s.setAutoEnabled('tags', on)),
+              _Switch('Tag notes and pictures',_s.autoEnabled('tags'), (on) => setState(() => _s.setAutoEnabled('tags', on)),
                   note: _notesNote(status), onNote: _getNotesModels),
             ]),
             _Group('Notes', [

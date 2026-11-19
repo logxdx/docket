@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: docket <docket@localhost>
+Date: Thu, 19 Nov 2026 22:45:00 +0530
+Subject: [PATCH] Android: Eye in Docket's one native library
+ (DesertAntAndroid)
+
+Eye (picture types, scenes, people and quality) joins Clear, Ear, Who, Gist, Align and Title in the shared dynamic product, so it adds its own code but not another copy of the Swift runtime; EyeNative loads DesertAntAndroid like the others.
+---
+ Package.swift                                                 | 4 ++--
+ .../eye-kotlin/src/main/kotlin/ai/desertant/eye/EyeNative.kt  | 2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/Package.swift b/Package.swift
+index 8d18852..8168e22 100644
+--- a/Package.swift
++++ b/Package.swift
+@@ -342,11 +342,11 @@ let modelWasmProducts: [Product] = noJavaScriptKit ? [] : models.filter { !$0.ap
+     .executable(name: "\(model.name)Web", targets: ["\(model.name)Web"])
+ }
+ 
+-// Docket's Android library: the six models it ships in one dynamic library, so the Swift runtime,
++// Docket's Android library: the models it ships in one dynamic library, so the Swift runtime,
+ // Foundation and the shared targets are linked once instead of once per model (each per-model
+ // library carries its own static copy, ~56 MB apiece). The model AARs then carry Kotlin only and
+ // every *Native.kt loads this one (NativeLibraries loads a library once, whichever model asks).
+-let sharedAndroidModels = ["Clear", "Ear", "Who", "Gist", "Align", "Title"]
++let sharedAndroidModels = ["Clear", "Ear", "Who", "Gist", "Align", "Title", "Eye"]
+ let sharedAndroidProducts: [Product] = noJavaScriptKit
+     ? [.library(name: "DesertAntAndroid", type: .dynamic, targets: sharedAndroidModels)]
+     : []
+diff --git a/packages/eye-kotlin/src/main/kotlin/ai/desertant/eye/EyeNative.kt b/packages/eye-kotlin/src/main/kotlin/ai/desertant/eye/EyeNative.kt
+index 2dc790d..3df89d6 100644
+--- a/packages/eye-kotlin/src/main/kotlin/ai/desertant/eye/EyeNative.kt
++++ b/packages/eye-kotlin/src/main/kotlin/ai/desertant/eye/EyeNative.kt
+@@ -4,7 +4,7 @@ import ai.desertant.core.NativeLibraries
+ import ai.desertant.core.NativeModelApi
+ 
+ internal object EyeNative : NativeModelApi {
+-    override fun ensureLoaded() = NativeLibraries.loadModel("EyeAndroid")
++    override fun ensureLoaded() = NativeLibraries.loadModel("DesertAntAndroid")
+     override external fun create(modelId: ByteArray, cacheRoot: ByteArray?, directory: ByteArray?): Long
+     override external fun destroy(handle: Long)
+     override external fun isDownloaded(handle: Long): Int
+-- 
+2.56.1
+

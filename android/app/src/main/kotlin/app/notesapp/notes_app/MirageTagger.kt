@@ -1,12 +1,7 @@
 package app.notesapp.notes_app
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Matrix
-import android.media.ExifInterface
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.ByteArrayInputStream
 
 /**
  * Mirage (Cactus Compute), the picture tagger: what is in a picture and the text it can read, kept by the app as
@@ -43,7 +38,7 @@ object MirageTagger {
             nativeThreads(4)
             loadedFrom = model
         }
-        val bitmap = decode(bytes) ?: throw IllegalArgumentException("not a picture Android can read")
+        val bitmap = uprightPicture(bytes, SIDE) ?: throw IllegalArgumentException("not a picture Android can read")
         val rgb = ByteArray(bitmap.width * bitmap.height * 3)
         val row = IntArray(bitmap.width)
         for (y in 0 until bitmap.height) {
@@ -85,37 +80,5 @@ object MirageTagger {
 
     private inline fun JSONArray.forEachObject(action: (JSONObject) -> Unit) {
         for (i in 0 until length()) optJSONObject(i)?.let(action)
-    }
-
-    /** [bytes] decoded, upright (EXIF) and no larger than [SIDE] on its longest side. */
-    private fun decode(bytes: ByteArray): Bitmap? {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-        var sample = 1
-        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= SIDE) sample *= 2
-        val opts = BitmapFactory.Options().apply { inSampleSize = sample; inPreferredConfig = Bitmap.Config.ARGB_8888 }
-        var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return null
-        val scale = SIDE.toFloat() / maxOf(bitmap.width, bitmap.height)
-        val turn = try {
-            when (ExifInterface(ByteArrayInputStream(bytes)).getAttributeInt(ExifInterface.TAG_ORIENTATION, 1)) {
-                ExifInterface.ORIENTATION_ROTATE_90 -> 90f
-                ExifInterface.ORIENTATION_ROTATE_180 -> 180f
-                ExifInterface.ORIENTATION_ROTATE_270 -> 270f
-                else -> 0f
-            }
-        } catch (_: Exception) {
-            0f
-        }
-        if (scale < 1f || turn != 0f) {
-            val m = Matrix().apply {
-                if (scale < 1f) postScale(scale, scale)
-                if (turn != 0f) postRotate(turn)
-            }
-            val upright = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, m, true)
-            if (upright !== bitmap) bitmap.recycle()
-            bitmap = upright
-        }
-        return bitmap
     }
 }

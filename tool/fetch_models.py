@@ -53,6 +53,9 @@ MODELS = {
     "title": ("desert-ant-labs/title", "v0.1.0",
               ["config.json", "generation_config.json", "model.safetensors", "model.safetensors.index.json",
                "tokenizer.json", "tokenizer_config.json", "chat_template.jinja"]),
+    # Pictures: what kind each is (a receipt, a screenshot, a whiteboard...), what is in it, its people and how sharp
+    # it is, as calibrated tags. The LiteRT export, one signature per task, and the names of its outputs.
+    "eye": ("desert-ant-labs/eye", "v1.0.0", ["eye.tflite", "eye_meta.json"]),
     # Picture tags for search (Cactus Compute's Mirage, Apache-2.0): what is in a picture and the text it can read.
     # Run by Cactus's engine, linked into libmirage_jni.so (tool/build_mirage_jni.sh). Pinned to the repo's commit.
     "mirage": ("Cactus-Compute/mirage", "3d03cee88c0acbe4e71b94b567ab14e6e55f40c9", ["mirage.cact"]),

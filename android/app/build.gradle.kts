@@ -84,7 +84,7 @@ val desertAntLibs = file("libs")
 android { sourceSets["main"].jniLibs.srcDir(desertAntLibs.resolve("jni")) }
 val checkDesertAntLibs by tasks.registering {
     doFirst {
-        val needed = listOf("clear", "ear", "who", "gist", "align", "title").map { "$it-release.aar" } +
+        val needed = listOf("clear", "ear", "who", "gist", "align", "title", "eye").map { "$it-release.aar" } +
             "jni/arm64-v8a/libDesertAntAndroid.so"
         for (file in needed) {
             if (!desertAntLibs.resolve(file).isFile) {
@@ -111,7 +111,7 @@ flutter {
 
 dependencies {
     // Desert Ant's on-device models (desertant.com), the versions tool/fetch_models.py pins: the core
-    // (LiteRT) from Maven; Clear, Ear, Who, Gist, Align and Title built from Desert Ant's source and Docket's
+    // (LiteRT) from Maven; Clear, Ear, Who, Gist, Align, Title and Eye built from Desert Ant's source and Docket's
     // patches by tool/build_desert_ant.sh (tool/ci.sh and tool/release.sh run it), sharing one native library.
     implementation("ai.desertant:core:4.3.0")
     // EmbeddingGemma 2 (search by meaning, text and pictures): its graphs on the same LiteRT as Desert Ant's models,
