@@ -371,6 +371,41 @@ class OfflineModels(private val context: Context) {
         }
     }
 
+    /**
+     * Models copied onto the phone instead of downloaded, for a phone kept offline: a model's files put in the app's
+     * own storage that a computer reaches over USB (Android/data/<app>/files/models/<id>/<path>, as Hugging Face has
+     * them) are taken in as a download is, each kept only when its size and sha256 are the pinned ones, and the
+     * copy let go. A file that is not right stays where it is, and the model is downloaded as usual. Returns the
+     * models taken in.
+     */
+    @Synchronized
+    fun adopt(): List<String> {
+        val inbox = File(context.getExternalFilesDir(null) ?: return emptyList(), "models")
+        if (!inbox.isDirectory) return emptyList()
+        val taken = mutableListOf<String>()
+        for (id in downloadIds()) {
+            if (archiveOf(id) != null) continue // Phonon's recognizers come as an archive: downloaded only
+            val dir = File(root, id)
+            var any = false
+            for (spec in specsOf(id) ?: continue) {
+                val copy = File(inbox, "$id/${spec.path}")
+                if (present(dir, spec) || copy.length() != spec.size) continue
+                try {
+                    copy.inputStream().buffered(1 shl 20).use { place(it, dir, spec, "$id/${spec.path}") {} }
+                    copy.delete()
+                    any = true
+                } catch (e: Exception) {
+                    android.util.Log.w("OfflineModels", "$id/${spec.path} not taken from ${copy.path}: ${e.message}")
+                }
+            }
+            if (any) {
+                File(dir, ".dal-meta").deleteRecursively()
+                taken += id
+            }
+        }
+        return taken
+    }
+
     /** Take [id] (a downloaded model) off the phone. */
     @Synchronized
     fun remove(id: String) {

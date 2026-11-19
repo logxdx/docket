@@ -152,6 +152,8 @@ class DesertAntBridge(private val context: Context, engine: FlutterEngine) {
                     scope.launch { channel.invokeMethod("models.progress", pct / 100.0) }
                 }
             }
+            // Models copied over USB for an offline phone (OfflineModels.adopt), checked as downloads are.
+            offline.adopt().forEach { android.util.Log.i("OfflineModels", "$it: taken from the copy on the phone") }
             status()
         }
         "models.status" -> status()

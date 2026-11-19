@@ -52,6 +52,11 @@ checked, over Wi-Fi unless you allow mobile data:
 Speech can use Android's own instead (Settings › Speech): its on-device speech to text (Android 13+) and its offline
 voices, with no download.
 
+A phone kept offline can be given the Desert Ant models from a computer instead: `python3 -I tool/fetch_models.py`,
+then copy a model's folder into `Android/data/app.notesapp.notes_app/files/models/` on the phone (for Eye,
+`adb push .models/models/eye /sdcard/Android/data/app.notesapp.notes_app/files/models/`). Docket takes each file in
+the next time it opens, checked as a download is.
+
 ## Install
 
 Download `docket-vX.Y.Z-arm64.apk` from [Releases](../../releases) (arm64 phones, Android 7+; notes in Documents
