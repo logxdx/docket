@@ -9,6 +9,7 @@ import '../search/meaning.dart';
 import '../voice/recording.dart';
 import '../voice/spoken.dart';
 import 'notebook.dart';
+import 'properties.dart';
 import 'search.dart';
 
 /// What to find.
@@ -120,9 +121,10 @@ final _taskLine = RegExp(r'^\s*[-*+] \[(.)\]\s+(.*)$');
 /// A line's Markdown marks: a list's, a task's, a heading's, a quote's.
 final _marks = RegExp(r'^\s*(?:[-*+]\s+(?:\[.\]\s+)?|\d+[.)]\s+|#{1,6}\s+|>\s*)');
 
-/// The pictures in [text]: name, alt text, and the line they are on with the lines around it.
+/// The pictures in [text]: name, alt text, and the line they are on with the lines around it (the note's body: a
+/// picture under its properties is not captioned "---").
 List<({String name, String alt, String around})> picturesIn(String text) {
-  final lines = text.split('\n');
+  final lines = withoutProperties(text).split('\n');
   final out = <({String name, String alt, String around})>[];
   for (var i = 0; i < lines.length; i++) {
     // Its caption: words on its own line, else the line before it, else the one after; as plain words.

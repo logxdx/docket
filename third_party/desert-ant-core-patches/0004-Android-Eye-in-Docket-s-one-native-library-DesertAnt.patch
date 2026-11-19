@@ -2,13 +2,17 @@ From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: docket <docket@localhost>
 Date: Thu, 19 Nov 2026 22:45:00 +0530
 Subject: [PATCH] Android: Eye in Docket's one native library
- (DesertAntAndroid)
+ (DesertAntAndroid), on the CPU
 
 Eye (picture types, scenes, people and quality) joins Clear, Ear, Who, Gist, Align and Title in the shared dynamic product, so it adds its own code but not another copy of the Swift runtime; EyeNative loads DesertAntAndroid like the others.
+
+On Android Eye runs on the CPU (XNNPACK): on an Adreno phone its GPU graphs compiled but the first analysis failed with no GL context on the calling thread, and LiteRT falls back to the CPU only when compiling fails. A cpuOnly request now reaches LiteRT for a multi-function model.
 ---
- Package.swift                                                 | 4 ++--
- .../eye-kotlin/src/main/kotlin/ai/desertant/eye/EyeNative.kt  | 2 +-
- 2 files changed, 3 insertions(+), 3 deletions(-)
+ Package.swift                                         |  4 ++--
+ Sources/Eye/ModelLoading.swift                        | 11 +++++++++--
+ Sources/Inference/SessionFactory.swift                |  3 ++-
+ .../src/main/kotlin/ai/desertant/eye/EyeNative.kt     |  2 +-
+ 4 files changed, 14 insertions(+), 6 deletions(-)
 
 diff --git a/Package.swift b/Package.swift
 index 8d18852..8168e22 100644
@@ -28,6 +32,43 @@ index 8d18852..8168e22 100644
  let sharedAndroidProducts: [Product] = noJavaScriptKit
      ? [.library(name: "DesertAntAndroid", type: .dynamic, targets: sharedAndroidModels)]
      : []
+diff --git a/Sources/Eye/ModelLoading.swift b/Sources/Eye/ModelLoading.swift
+index 36b0ff7..59438ec 100644
+--- a/Sources/Eye/ModelLoading.swift
++++ b/Sources/Eye/ModelLoading.swift
+@@ -18,9 +18,16 @@ public struct ModelAssets: Sendable {
+     /// Build from a resolved model directory: the sidecar, and this platform's
+     /// session for each function of the one artifact.
+     static func eye(files: StoredModel) async throws -> ModelAssets {
+-        try ModelAssets(
++        // On Android, the CPU (XNNPACK): on Adreno the GPU graphs compile but the first run fails with no GL context
++        // on the calling thread ("analysis failed"), and the GPU is only tried, not fallen back from, at compile time.
++        #if os(Android)
++        let units = ComputeUnits.cpuOnly
++        #else
++        let units = ComputeUnits.all
++        #endif
++        return try ModelAssets(
+             sessions: try await files.inferenceSessions(model: EyeModel.artifact, functions: EyeModel.functions,
+-                                                        sdk: EyeModel.sdkInfo),
++                                                        computeUnits: units, sdk: EyeModel.sdkInfo),
+             meta: try files.read(EyeModel.meta))
+     }
+ }
+diff --git a/Sources/Inference/SessionFactory.swift b/Sources/Inference/SessionFactory.swift
+index 6498821..34a2ba8 100644
+--- a/Sources/Inference/SessionFactory.swift
++++ b/Sources/Inference/SessionFactory.swift
+@@ -106,7 +106,8 @@ public extension StoredModel {
+         }
+         return sessions
+         #elseif canImport(CLiteRt)
+-        let compiled = try LiteRTModel(modelPath: path(model))
++        // .cpuOnly reaches LiteRT too: a model whose GPU graphs compile but cannot run on a phone's driver.
++        let compiled = try LiteRTModel(modelPath: path(model), accelerator: computeUnits == .cpuOnly ? .cpu : .auto)
+         var sessions: [String: any InferenceSession] = [:]
+         for function in functions {
+             guard compiled.signatures.contains(function) else {
 diff --git a/packages/eye-kotlin/src/main/kotlin/ai/desertant/eye/EyeNative.kt b/packages/eye-kotlin/src/main/kotlin/ai/desertant/eye/EyeNative.kt
 index 2dc790d..3df89d6 100644
 --- a/packages/eye-kotlin/src/main/kotlin/ai/desertant/eye/EyeNative.kt

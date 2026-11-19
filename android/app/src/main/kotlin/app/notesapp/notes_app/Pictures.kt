@@ -44,8 +44,8 @@ internal fun uprightPicture(bytes: ByteArray, side: Int): Bitmap? {
  * What Eye (Desert Ant) says about a picture, as the notes keep it:
  *  - "kind": what the picture is (`receipt`, `screenshot`, `whiteboard`, ...) when Eye is sure of it (at its
  *    recommended cutoff), else null; a plain photo or "other" is no kind worth a tag;
- *  - "tags": what else it sees, at that cutoff, most sure first: the things in it (Open Images' scenes), its people
- *    (`group_shot`, `smiling`) and how it was taken (`blurry`, `bokeh`), for search;
+ *  - "tags": in a photo or a selfie, what else it sees, at that cutoff, most sure first: the things in it (Open
+ *    Images' scenes), its people (`group_shot`, `smiling`) and how it was taken (`blurry`, `bokeh`), for search;
  *  - "rotation": how far it is turned clockwise from upright when Eye is sure, else null.
  * Keep-or-delete judgements (the model's least reliable) and sensitive-content flags are left out: they are not what
  * someone searches their notes for.
@@ -65,6 +65,9 @@ object PictureEye {
     /** Kinds that say nothing a tag would add. */
     private val plain = setOf("photo", "other")
 
+    /** Kinds Eye was made for: only in these does it say what else it sees. */
+    private val photos = setOf("photo", "selfie")
+
     /** Eye's photo types: a kind is one of these, never also a tag. */
     private val kinds = setOf(
         "chart_or_slide", "document", "id_card", "illustration_or_art", "map", "medical_reference", "meme_or_graphic",
@@ -74,7 +77,10 @@ object PictureEye {
 
     fun read(a: Analysis): Map<String, Any?> {
         val kind = a.kind?.id?.takeIf { it !in plain && a.has(Tag(it)) }
-        val tags = a.tags().map { it.id }.filter { it !in left && it !in kinds }
+        // Only for a photo: on a screenshot, a chart or a receipt Eye's scenes are guesses, sure ones too (on the phone,
+        // "food" at 0.89 on a diagram, "skiing" on a receipt), as Desert Ant says of anything not a photograph.
+        val photo = a.kind?.id in photos
+        val tags = if (!photo) emptyList() else a.tags().map { it.id }.filter { it !in left && it !in kinds }
         return mapOf("kind" to kind, "tags" to tags, "rotation" to a.rotation)
     }
 }

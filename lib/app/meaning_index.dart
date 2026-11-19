@@ -125,13 +125,14 @@ class MeaningIndex extends ChangeNotifier {
     return out;
   }
 
-  /// Eye's look at [bytes]; a picture it cannot read is an empty look (not asked again), never an error.
+  /// Eye's look at [bytes], or null when it could not look (asked again on the next pass, as Mirage is), never an
+  /// error: the rest of the note is indexed either way.
   Future<PictureLook?> _lookAt(Uint8List bytes) async {
     try {
       return await ant.lookAtPicture(bytes);
     } on Object catch (e) {
       debugPrint('meaning index: Eye could not look at a picture: $e');
-      return const PictureLook();
+      return null;
     }
   }
 

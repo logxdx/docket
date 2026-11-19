@@ -142,4 +142,11 @@ void main() {
     // Tasks are found by words only.
     expect(withMeaning(book, const [], const SearchFilters(kind: Kind.tasks), passages: passages, pictures: pictures), isEmpty);
   });
+
+  test("a picture under the note's properties takes its caption from the body, never the closing ---", () {
+    final pics = picturesIn('---\ntags:\n  - receipt\n---\n![[receipt.jpg]]\nLunch with Sam\n');
+    expect(pics.single.name, 'receipt.jpg');
+    expect(pics.single.around, 'Lunch with Sam');
+    expect(picturesIn('---\ntags:\n  - receipt\n---\n![[receipt.jpg]]\n').single.around, '');
+  });
 }

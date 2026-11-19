@@ -78,8 +78,8 @@ class _NotesScreenState extends State<NotesScreen> {
     super.dispose();
   }
 
-  Future<void> _open(Note note, {bool edit = false}) =>
-      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => NoteScreen(path: note.path, startEditing: edit)));
+  Future<void> _open(Note note, {bool edit = false, bool made = false}) => Navigator.push(
+      context, MaterialPageRoute<void>(builder: (_) => NoteScreen(path: note.path, startEditing: edit, made: made)));
 
   void _go(String folder) => setState(() {
         _folder = folder;
@@ -156,7 +156,8 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   /// + Picture: a note holding a picture from the phone (copied into the attachments folder), opened to write
-  /// about it. It stays "Untitled" until written in: then it is titled and tagged like any note.
+  /// about it. Left as it is, it is tagged with what the picture is (a receipt, a whiteboard); it stays "Untitled"
+  /// until written in, then it is titled and tagged like any note.
   Future<void> _newPicture() async {
     final picked = await _pick('image/*');
     if (picked == null || !mounted) return;
@@ -165,7 +166,7 @@ class _NotesScreenState extends State<NotesScreen> {
       final into = _s.attachmentsFolder.isEmpty ? folder : _s.attachmentsFolder;
       final name = await addAttachment(_book, folder: into, source: File(picked.path), name: picked.name, audio: false);
       final note = await _book.create('Untitled', folder: folder, text: '![[$name]]\n\n');
-      if (mounted) await _open(note, edit: true);
+      if (mounted) await _open(note, edit: true, made: true);
     } on Object catch (e) {
       _say('The picture could not be added: $e');
     } finally {

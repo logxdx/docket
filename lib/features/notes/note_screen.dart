@@ -43,10 +43,20 @@ import 'spoken_view.dart';
 const taskScheme = 'notes-task:';
 
 class NoteScreen extends StatefulWidget {
-  const NoteScreen({super.key, required this.path, this.startEditing = false, this.anchor, this.playAt});
+  const NoteScreen({
+    super.key,
+    required this.path,
+    this.startEditing = false,
+    this.anchor,
+    this.playAt,
+    this.made = false,
+  });
 
   final String path;
   final bool startEditing;
+
+  /// A note Docket just made with something in it (a picture from +): enriched when left, as if written here.
+  final bool made;
 
   /// A heading to scroll to once open (a [[Note#Heading]] link).
   final String? anchor;
@@ -74,7 +84,7 @@ class _NoteScreenState extends State<NoteScreen> {
 
   /// Whether the note was changed on this page: then it is enriched (tags, a
   /// title) when the editor or the page is left.
-  bool _edited = false;
+  late bool _edited = widget.made;
 
   /// Each recording's playback, by audio name, shared by its player and its transcript.
   final _playbacks = <String, Playback>{};
